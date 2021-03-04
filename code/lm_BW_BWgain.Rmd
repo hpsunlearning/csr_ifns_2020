@@ -79,20 +79,39 @@ BW_sum2 <- BW %>% group_by(TimePoint_Weeks, BirthMode, Sex) %>% summarise(N = n(
 BW_sum2 %>% mutate(Count = paste0(N, "(", N_family, ")")) %>% select(BirthMode, Sex, TimePoint_Weeks, Count) %>% spread(key = TimePoint_Weeks, value = Count) %>% View
 ```
 
-### lm start from week 3
+### lmm
 ```{r}
-BW_wk = BW %>% filter(TimePoint_Weeks > 2)
+BW_wk = BW
 
-fit_male= lm(Weight_g ~ TimePoint_Weeks + BirthMode, data = BW_wk %>% filter(Sex == "M"))
-allEffects(fit_male)
+fit = lm(Weight_g ~ TimePoint_Weeks + BirthMode + Sex, data = BW_wk)
+summary(fit)
+allEffects(fit)
 fit_female= lm(Weight_g ~ TimePoint_Weeks + BirthMode, data = BW_wk %>% filter(Sex == "F"))
+summary(fit_female)
 allEffects(fit_female)
+fit_male= lm(Weight_g ~ TimePoint_Weeks + BirthMode, data = BW_wk %>% filter(Sex == "M"))
+summary(fit_male)
+allEffects(fit_male)
 
-fit_lme4 = lmer(Weight_g ~ TimePoint_Weeks + BirthMode + (TimePoint_Weeks|FamilyID), data = BW_wk %>% filter(Sex == "F"))
+fit_lme4 = lmer(Weight_g ~ TimePoint_Weeks + BirthMode + Sex + (TimePoint_Weeks|FamilyID), data = BW_wk)
+summary(fit_lme4)
+allEffects(fit_lme4)
+fit_lme4_f = lmer(Weight_g ~ TimePoint_Weeks + BirthMode + (TimePoint_Weeks|FamilyID), data = BW_wk %>% filter(Sex == "F"))
+summary(fit_lme4_f)
+allEffects(fit_lme4_f)
+fit_lme4_m = lmer(Weight_g ~ TimePoint_Weeks + BirthMode + (TimePoint_Weeks|FamilyID), data = BW_wk %>% filter(Sex == "M"))
+summary(fit_lme4_m)
+allEffects(fit_lme4_m)
 
+fit_nlme = lme(Weight_g ~ TimePoint_Weeks + BirthMode + Sex, random = ~1|FamilyID, data = BW_wk, method = "REML")
+summary(fit_nlme)
+allEffects(fit_nlme)
 fit_nlme_f = lme(Weight_g ~ TimePoint_Weeks + BirthMode, random = ~1|FamilyID, data = BW_wk %>% filter(Sex == "F"), method = "REML")
+summary(fit_nlme_f)
+allEffects(fit_nlme_f)
 fit_nlme_m = lme(Weight_g ~ TimePoint_Weeks + BirthMode, random = ~1|FamilyID, data = BW_wk %>% filter(Sex == "M"), method = "REML")
-
+summary(fit_nlme_m)
+allEffects(fit_nlme_m)
 ```
 
 
