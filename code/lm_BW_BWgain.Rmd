@@ -55,7 +55,7 @@ BW <- read_excel(paste0(path_rec, "MasterMetadata-CS-SW-Oct2019-20210224-HS.xlsx
 BW$BirthMode = factor(BW$BirthMode, levels = c("VF", "CSR", "CS"))
 BW = BW %>% mutate(covid = case_when(Batch %in% c("Batch9","Batch10") ~ "Post covid",
                                      TRUE ~ "Before covid"))
-# BW <- BW %>% filter(!FamilyID %in% c("VF1", "CSR1") )
+
 current_days <- max(BW$TimePoint_Days)
 
 BW_sum <- BW %>% group_by(TimePoint_Days, BirthMode, Sex) %>% summarise(N = n(), Mean = mean(Weight_g), SE = sd(Weight_g)/sqrt(N))
@@ -77,79 +77,91 @@ p = ggplot(BW, aes(x = TimePoint_Days, y = Weight_g, color = BirthMode)) +
 ```{r message=FALSE, warning=FALSE}
 BW_sum2 <- BW %>% group_by(TimePoint_Weeks, BirthMode, Sex) %>% summarise(N = n(), N_batch = unique(Batch) %>% length, N_family = unique(FamilyNo) %>% length(), Mean = mean(Weight_g), SE = sd(Weight_g)/sqrt(N))
 
-BW_sum2 %>% mutate(Count = paste0(N, "(", N_family, ")")) %>% select(BirthMode, Sex, TimePoint_Weeks, Count) %>% spread(key = TimePoint_Weeks, value = Count) %>% View
+BW_sum2 %>% mutate(Count = paste0(N, "(", N_family, ")")) %>% select(BirthMode, Sex, TimePoint_Weeks, Count) %>% spread(key = TimePoint_Weeks, value = Count)
 ```
 
-### lmm
+### LMM
 ```{r}
-fit = lm(Weight_g ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, data = BW)
+fit = lm(Weight_g ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, data = BW)
 summary(fit)
 allEffects(fit)
 
+fit_lme4 = lmer(Weight_g ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject + (1|MouseID), data = BW)
+summary(fit_lme4)
+allEffects(fit_lme4)
+anova(fit_lme4)
+rand(fit_lme4)
 
-fit_lme4_2 = lmer(Weight_g ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject + (1|MouseID), data = BW)
-summary(fit_lme4_2)
-allEffects(fit_lme4_2)
-anova(fit_lme4_2)
-rand(fit_lme4_2)
-
-
-fit_nlme_2 = lme(Weight_g ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, random = ~1|MouseID, data = BW, method = "REML")
-summary(fit_nlme_2)
-allEffects(fit_nlme_2)
-anova(fit_nlme_2)
+fit_nlme = lme(Weight_g ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, random = ~1|MouseID, data = BW, method = "REML")
+summary(fit_nlme)
+allEffects(fit_nlme)
+anova(fit_nlme)
 
 ```
 
 
 ## Body Weight gain relative to week 3
 ```{r}
-BWgain= BW %>% filter(TimePoint_Weeks > 3) %>% arrange(MouseID, TimePoint_Weeks) %>% group_by(MouseID) %>% mutate(BW_gain = Weight_g - Weight_g[1], BW_gain_percent = BW_gain/Weight_g[1],N = n()) %>% filter(TimePoint_Weeks > 3, N > 3)
+BWgain= BW %>% filter(TimePoint_Weeks > 2) %>% arrange(MouseID, TimePoint_Weeks) %>% group_by(MouseID) %>% mutate(BW_gain = Weight_g - Weight_g[1], BW_gain_percent = BW_gain/Weight_g[1],N = n()) %>% filter(TimePoint_Weeks > 3, N > 3)
 
+BWgain_sum <- BWgain %>% group_by(TimePoint_Weeks, BirthMode, Sex) %>% summarise(N = n(), N_batch = unique(Batch) %>% length, N_family = unique(FamilyNo) %>% length(), Mean = mean(BW_gain_percent), SE = sd(BW_gain_percent)/sqrt(N))
 
-
+p = ggplot(BWgain_sum, aes(x = TimePoint_Weeks, y = Mean, color = BirthMode)) + 
+    geom_point() + 
+    geom_line() + 
+    scale_color_manual(values = BirthMode_color, aesthetics = c("fill", "colour")) + 
+    facet_wrap(~Sex) + 
+    labs(x = "Sampling_Week", y = "Body Weight gain (%)", title = "")
 
 ```
 
-### lmm BW_gain
+### LMM BW_gain
 ```{r}
-fitgain = lm(BW_gain ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, data = BWgain)
+fitgain = lm(BW_gain ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, data = BWgain)
 summary(fitgain)
 allEffects(fitgain)
 
+fitgain_lme4 = lmer(BW_gain ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject + (1|MouseID), data = BWgain)
+summary(fitgain_lme4)
+allEffects(fitgain_lme4)
+anova(fitgain_lme4)
+rand(fitgain_lme4)
 
-fitgain_lme4_2 = lmer(BW_gain ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject + (1|MouseID), data = BWgain)
-summary(fitgain_lme4_2)
-allEffects(fitgain_lme4_2)
-anova(fitgain_lme4_2)
-rand(fitgain_lme4_2)
-
-
-fitgain_nlme_2 = lme(BW_gain ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, random = ~1|MouseID, data = BWgain, method = "REML")
-summary(fitgain_nlme_2)
-allEffects(fitgain_nlme_2)
-anova(fitgain_nlme_2)
+fitgain_nlme = lme(BW_gain ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, random = ~1|MouseID, data = BWgain, method = "REML")
+summary(fitgain_nlme)
+allEffects(fitgain_nlme)
+anova(fitgain_nlme)
 
 ```
 
-### lmm BW_gain_percent
+### LMM BW_gain_percent
 ```{r}
-fitgainp = lm(BW_gain_percent ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, data = BWgain)
+fitgainp = lm(BW_gain_percent ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, data = BWgain)
 summary(fitgainp)
 allEffects(fitgainp)
 
+fitgainp_lme4 = lmer(BW_gain_percent ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject + (1|MouseID), data = BWgain)
+summary(fitgainp_lme4)
+allEffects(fitgainp_lme4)
+anova(fitgainp_lme4)
+rand(fitgainp_lme4)
 
-fitgainp_lme4_2 = lmer(BW_gain_percent ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject + (1|MouseID), data = BWgain)
-summary(fitgainp_lme4_2)
-allEffects(fitgainp_lme4_2)
-anova(fitgainp_lme4_2)
-rand(fitgainp_lme4_2)
+fitgainp_lme4_f = lmer(BW_gain_percent ~ TimePoint_Weeks + BirthMode + (1|MouseID), data = BWgain %>% filter(Sex == "F"))
+summary(fitgainp_lme4_f)
+allEffects(fitgainp_lme4_f)
+anova(fitgainp_lme4_f)
+rand(fitgainp_lme4_f)
 
+fitgainp_lme4_m = lmer(BW_gain_percent ~ TimePoint_Weeks + BirthMode + (1|MouseID), data = BWgain %>% filter(Sex == "M"))
+summary(fitgainp_lme4_m)
+allEffects(fitgainp_lme4_m)
+anova(fitgainp_lme4_m)
+rand(fitgainp_lme4_m)
 
-fitgainp_nlme_2 = lme(BW_gain_percent ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, random = ~1|MouseID, data = BWgain, method = "REML")
-summary(fitgainp_nlme_2)
-allEffects(fitgainp_nlme_2)
-anova(fitgainp_nlme_2)
+fitgainp_nlme = lme(BW_gain_percent ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, random = ~1|MouseID, data = BWgain, method = "REML")
+summary(fitgainp_nlme)
+allEffects(fitgainp_nlme)
+anova(fitgainp_nlme)
 
 ```
 
