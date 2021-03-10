@@ -16,6 +16,7 @@ library(ggrepel)
 library(nlme)
 library(effects)
 library(lme4)
+library(lmerTest)
 # library(ggpubr)
 
 options(max.print="75")
@@ -23,8 +24,8 @@ knitr::opts_chunk$set(echo = TRUE, cache = TRUE, warning = FALSE, prompt=FALSE, 
 opts_knit$set(width=75)
 
 # set path
-opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
-setwd(rprojroot::find_rstudio_root_file())
+#opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+#setwd(rprojroot::find_rstudio_root_file())
 ## path to data record on dropbox
 path_rec <- "~/Dropbox/IFNH CSR/ExperimentRecords/"
 list.files(path_rec)
@@ -34,7 +35,7 @@ nc <- switch(Sys.info()[['sysname']], Windows = 1, Darwin = 4, Linux = 12)
 
 #source("~/Dropbox/42-JCHWANG-RUTGERS/Projects-Rutgers/Src/utils.R")
 
-sessionInfo()
+#sessionInfo()
 ```
 
 ## settings
@@ -73,7 +74,7 @@ p = ggplot(BW, aes(x = TimePoint_Days, y = Weight_g, color = BirthMode)) +
 ```
 
 ### Summary table
-```{r}
+```{r message=FALSE, warning=FALSE}
 BW_sum2 <- BW %>% group_by(TimePoint_Weeks, BirthMode, Sex) %>% summarise(N = n(), N_batch = unique(Batch) %>% length, N_family = unique(FamilyNo) %>% length(), Mean = mean(Weight_g), SE = sd(Weight_g)/sqrt(N))
 
 BW_sum2 %>% mutate(Count = paste0(N, "(", N_family, ")")) %>% select(BirthMode, Sex, TimePoint_Weeks, Count) %>% spread(key = TimePoint_Weeks, value = Count) %>% View
@@ -81,84 +82,76 @@ BW_sum2 %>% mutate(Count = paste0(N, "(", N_family, ")")) %>% select(BirthMode, 
 
 ### lmm
 ```{r}
-BW_wk = BW
-
-fit = lm(Weight_g ~ TimePoint_Weeks + BirthMode + Sex, data = BW_wk)
+fit = lm(Weight_g ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, data = BW)
 summary(fit)
 allEffects(fit)
-fit_female= lm(Weight_g ~ TimePoint_Weeks + BirthMode, data = BW_wk %>% filter(Sex == "F"))
-summary(fit_female)
-allEffects(fit_female)
-fit_male= lm(Weight_g ~ TimePoint_Weeks + BirthMode, data = BW_wk %>% filter(Sex == "M"))
-summary(fit_male)
-allEffects(fit_male)
 
-fit_lme4 = lmer(Weight_g ~ TimePoint_Weeks + BirthMode + Sex + (TimePoint_Weeks|FamilyID), data = BW_wk)
-summary(fit_lme4)
-allEffects(fit_lme4)
-fit_lme4_f = lmer(Weight_g ~ TimePoint_Weeks + BirthMode + (TimePoint_Weeks|FamilyID), data = BW_wk %>% filter(Sex == "F"))
-summary(fit_lme4_f)
-allEffects(fit_lme4_f)
-fit_lme4_m = lmer(Weight_g ~ TimePoint_Weeks + BirthMode + (TimePoint_Weeks|FamilyID), data = BW_wk %>% filter(Sex == "M"))
-summary(fit_lme4_m)
-allEffects(fit_lme4_m)
 
-fit_nlme = lme(Weight_g ~ TimePoint_Weeks + BirthMode + Sex, random = ~1|FamilyID, data = BW_wk, method = "REML")
-summary(fit_nlme)
-allEffects(fit_nlme)
-fit_nlme_f = lme(Weight_g ~ TimePoint_Weeks + BirthMode, random = ~1|FamilyID, data = BW_wk %>% filter(Sex == "F"), method = "REML")
-summary(fit_nlme_f)
-allEffects(fit_nlme_f)
-fit_nlme_m = lme(Weight_g ~ TimePoint_Weeks + BirthMode, random = ~1|FamilyID, data = BW_wk %>% filter(Sex == "M"), method = "REML")
-summary(fit_nlme_m)
-allEffects(fit_nlme_m)
+fit_lme4_2 = lmer(Weight_g ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject + (1|MouseID), data = BW)
+summary(fit_lme4_2)
+allEffects(fit_lme4_2)
+anova(fit_lme4_2)
+rand(fit_lme4_2)
+
+
+fit_nlme_2 = lme(Weight_g ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, random = ~1|MouseID, data = BW, method = "REML")
+summary(fit_nlme_2)
+allEffects(fit_nlme_2)
+anova(fit_nlme_2)
+
 ```
-
-
 
 
 ## Body Weight gain relative to week 3
 ```{r}
-BW_f <- BW %>% filter(ExperimentSet=="Set1-BW", TimePoint_Weeks>=3) %>% arrange(TimePoint_Weeks) %>% group_by(MouseID) %>% mutate(Weight_gain = Weight_g - Weight_g[1])
-
-date_range <- c(4, 16)
-
-BW_f_dat <- BW_f %>% filter(TimePoint_Weeks<=date_range[2], TimePoint_Weeks>=date_range[1])
-
-BW_f_dat %>% group_by(TimePoint_Weeks, BirthMode, Sex) %>% summarise(N = n()) %>% pivot_wider(names_from = c(BirthMode, Sex), values_from = N)
-
-BW_f_dat_stat_sum <- BW_f_dat %>% group_by(TimePoint_Weeks, BirthMode, Sex) %>% summarise(Mean_cl = Hmisc::smean.cl.normal(x = Weight_gain) %>% paste(collapse = "-"), N = n()) %>% separate(Mean_cl, into = c("Mean", "Lwr", "Uwr"), sep = "-", convert = T) %>% ungroup
-
-BW_f_dat_test <- BW_f_dat %>% group_by(TimePoint_Weeks, Sex) %>% t_test(Weight_gain ~ BirthMode, p.adjust.method = "none") %>% ungroup() %>% mutate(p.adj = p.adjust(p, method = "fdr"))
-
-BW_f_dat_test_tbl1 <- BW_f_dat_test %>% pivot_wider(id_cols = c(Sex, group1, group2), names_from = TimePoint_Weeks, values_from = p.adj)
+BWgain= BW %>% filter(TimePoint_Weeks > 3) %>% arrange(MouseID, TimePoint_Weeks) %>% group_by(MouseID) %>% mutate(BW_gain = Weight_g - Weight_g[1], BW_gain_percent = BW_gain/Weight_g[1],N = n()) %>% filter(TimePoint_Weeks > 3, N > 3)
 
 
-BW_f_dat_test_sum <- split(BW_f_dat, f = list(BW_f_dat$TimePoint_Weeks, BW_f_dat$Sex)) %>% lapply(., function(x){(aov(Weight_gain ~ BirthMode, data = x) %>% agricolae::duncan.test(trt = "BirthMode", console = T))$groups %>% rownames_to_column(var = "BirthMode")})
 
-BW_f_dat_test_sum2 <- lapply(seq_along(BW_f_dat_test_sum), function(x){BW_f_dat_test_sum[[x]] %>% mutate(Weeks_sex = names(BW_f_dat_test_sum)[[x]]) %>% separate(Weeks_sex, into = c("TimePoint_Weeks", "Sex"), sep = "\\.")}) %>% do.call("rbind",.) %>% mutate(TimePoint_Weeks = as.numeric(TimePoint_Weeks))
-
-
-ggplot(BW_f_dat, aes(x = TimePoint_Weeks, y = Weight_gain, color = BirthMode)) +
-    geom_point(size = 0.5, alpha = 0.5) +
-    geom_path(aes(group = MouseNo), color = "grey", size = 0.5, alpha = 0.5) +
-    stat_summary(geom = "point", fun = "mean", size = 1) +
-    stat_summary(geom = "line", fun = "mean", linetype = "dashed") +
-    geom_ribbon(data = BW_f_dat_stat_sum, aes(x = TimePoint_Weeks, y = Mean, ymin = Lwr, ymax = Uwr, fill = BirthMode), alpha = 0.2, color = NA) +
-    geom_point(data = BW_f_dat_stat_sum, aes(x = TimePoint_Weeks, y = Mean), size = 1.5) +
-    geom_line(data = BW_f_dat_stat_sum, aes(x = TimePoint_Weeks, y = Mean)) +
-    geom_label_repel(data = BW_f_dat_test_sum2, aes(label = groups), size = 6/.pt, label.padding = 0.1) +
-    facet_grid(.~Sex) +
-    scale_x_continuous(breaks = c(seq(2, 18, 1))) + 
-    scale_color_manual(values = c("#377EB8", "#4DAF4A", "#E41A1C")) +
-    scale_fill_manual(values = c("#377EB8", "#4DAF4A", "#E41A1C")) +
-    labs(x = "Sampling_Week", y = "Body Weight(g)", title = "C-Section Restoration Project - Body Weight", subtitle = str_wrap("Mean and 95% CI were plotted starting from week 4; ANOVA test with duncan's multiple range tests were performed at each week between week 4 and 15.", width = 120)) +
-    theme_jw() + theme(panel.grid.minor = element_blank(), aspect.ratio = 0.8, plot.title = element_text(hjust = 0))
 
 ```
 
+### lmm BW_gain
+```{r}
+fitgain = lm(BW_gain ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, data = BWgain)
+summary(fitgain)
+allEffects(fitgain)
 
 
+fitgain_lme4_2 = lmer(BW_gain ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject + (1|MouseID), data = BWgain)
+summary(fitgain_lme4_2)
+allEffects(fitgain_lme4_2)
+anova(fitgain_lme4_2)
+rand(fitgain_lme4_2)
+
+
+fitgain_nlme_2 = lme(BW_gain ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, random = ~1|MouseID, data = BWgain, method = "REML")
+summary(fitgain_nlme_2)
+allEffects(fitgain_nlme_2)
+anova(fitgain_nlme_2)
+
+```
+
+### lmm BW_gain_percent
+```{r}
+fitgainp = lm(BW_gain_percent ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, data = BWgain)
+summary(fitgainp)
+allEffects(fitgainp)
+
+
+fitgainp_lme4_2 = lmer(BW_gain_percent ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject + (1|MouseID), data = BWgain)
+summary(fitgainp_lme4_2)
+allEffects(fitgainp_lme4_2)
+anova(fitgainp_lme4_2)
+rand(fitgainp_lme4_2)
+
+
+fitgainp_nlme_2 = lme(BW_gain_percent ~ TimePoint_Weeks*BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, random = ~1|MouseID, data = BWgain, method = "REML")
+summary(fitgainp_nlme_2)
+allEffects(fitgainp_nlme_2)
+anova(fitgainp_nlme_2)
+
+```
 
 
 
