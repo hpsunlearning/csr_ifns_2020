@@ -84,18 +84,28 @@ BW_sum2 %>% mutate(Count = paste0(N, "(", N_family, ")")) %>% select(BirthMode, 
 ```{r}
 fit = lm(Weight_g ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, data = BW)
 summary(fit)
-allEffects(fit)
+
 
 fit_lme4 = lmer(Weight_g ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject + (1|MouseID), data = BW)
 summary(fit_lme4)
-allEffects(fit_lme4)
 anova(fit_lme4)
 rand(fit_lme4)
 
-fit_nlme = lme(Weight_g ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, random = ~1|MouseID, data = BW, method = "REML")
-summary(fit_nlme)
-allEffects(fit_nlme)
-anova(fit_nlme)
+fit_lme4_f1 = lmer(Weight_g ~ TimePoint_Weeks + BirthMode + covid + (1|MouseID), data = BW %>% filter(Sex == "F"))
+summary(fit_lme4_f1)
+anova(fit_lme4_f1)
+rand(fit_lme4_f1)
+
+fit_lme4_f2 = lmer(Weight_g ~ TimePoint_Weeks*BirthMode + covid + (1|MouseID), data = BW %>% filter(Sex == "F"))
+summary(fit_lme4_f2)
+anova(fit_lme4_f2)
+rand(fit_lme4_f2)
+
+fit_lme4_f3 = lmer(Weight_g ~ TimePoint_Weeks*BirthMode + covid + (TimePoint_Weeks|MouseID), data = BW %>% filter(Sex == "F"))
+summary(fit_lme4_f3)
+anova(fit_lme4_f3)
+rand(fit_lme4_f3)
+
 
 ```
 
@@ -119,7 +129,6 @@ p = ggplot(BWgain_sum, aes(x = TimePoint_Weeks, y = Mean, color = BirthMode)) +
 ```{r}
 fitgain = lm(BW_gain ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, data = BWgain)
 summary(fitgain)
-allEffects(fitgain)
 
 fitgain_lme4 = lmer(BW_gain ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject + (1|MouseID), data = BWgain)
 summary(fitgain_lme4)
@@ -127,10 +136,23 @@ allEffects(fitgain_lme4)
 anova(fitgain_lme4)
 rand(fitgain_lme4)
 
-fitgain_nlme = lme(BW_gain ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, random = ~1|MouseID, data = BWgain, method = "REML")
-summary(fitgain_nlme)
-allEffects(fitgain_nlme)
-anova(fitgain_nlme)
+fitgain_lme4_f1 = lmer(BW_gain ~ TimePoint_Weeks + BirthMode + covid + (1|MouseID), data =  BWgain %>% filter(Sex == "F"))
+summary(fitgain_lme4_f1)
+allEffects(fitgain_lme4_f1)
+anova(fitgain_lme4_f1)
+rand(fitgain_lme4_f1)
+
+fitgain_lme4_f2 = lmer(BW_gain ~ TimePoint_Weeks*BirthMode + covid + (1|MouseID), data =  BWgain %>% filter(Sex == "F"))
+summary(fitgain_lme4_f2)
+allEffects(fitgain_lme4_f2)
+anova(fitgain_lme4_f2)
+rand(fitgain_lme4_f2)
+
+fitgain_lme4_f3 = lmer(BW_gain ~ TimePoint_Weeks*BirthMode + covid + (TimePoint_Weeks|MouseID), data =  BWgain %>% filter(Sex == "F"))
+summary(fitgain_lme4_f3)
+allEffects(fitgain_lme4_f3)
+anova(fitgain_lme4_f3)
+rand(fitgain_lme4_f3)
 
 ```
 
@@ -146,22 +168,26 @@ allEffects(fitgainp_lme4)
 anova(fitgainp_lme4)
 rand(fitgainp_lme4)
 
-fitgainp_lme4_f = lmer(BW_gain_percent ~ TimePoint_Weeks + BirthMode + (1|MouseID), data = BWgain %>% filter(Sex == "F"))
-summary(fitgainp_lme4_f)
-allEffects(fitgainp_lme4_f)
-anova(fitgainp_lme4_f)
-rand(fitgainp_lme4_f)
+fitgainp_lme4_f1 = lmer(BW_gain_percent ~ TimePoint_Weeks + BirthMode + covid + (1|MouseID), data = BWgain %>% filter(Sex == "F"))
+summary(fitgainp_lme4_f1)
+allEffects(fitgainp_lme4_f1)
+anova(fitgainp_lme4_f1)
+rand(fitgainp_lme4_f1)
 
-fitgainp_lme4_m = lmer(BW_gain_percent ~ TimePoint_Weeks + BirthMode + (1|MouseID), data = BWgain %>% filter(Sex == "M"))
-summary(fitgainp_lme4_m)
-allEffects(fitgainp_lme4_m)
-anova(fitgainp_lme4_m)
-rand(fitgainp_lme4_m)
+fitgainp_lme4_f2 = lmer(BW_gain_percent ~ TimePoint_Weeks*BirthMode + covid + (1|MouseID), data = BWgain %>% filter(Sex == "F"))
+summary(fitgainp_lme4_f2)
+allEffects(fitgainp_lme4_f2)
+anova(fitgainp_lme4_f2)
+rand(fitgainp_lme4_f2)
 
-fitgainp_nlme = lme(BW_gain_percent ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, random = ~1|MouseID, data = BWgain, method = "REML")
-summary(fitgainp_nlme)
-allEffects(fitgainp_nlme)
-anova(fitgainp_nlme)
+fitgainp_lme4_f3 = lmer(BW_gain_percent ~ TimePoint_Weeks*BirthMode + covid + (TimePoint_Weeks|MouseID), data = BWgain %>% filter(Sex == "F"))
+summary(fitgainp_lme4_f3)
+allEffects(fitgainp_lme4_f3)
+anova(fitgainp_lme4_f3)
+rand(fitgainp_lme4_f3)
+
+
+
 
 ```
 
