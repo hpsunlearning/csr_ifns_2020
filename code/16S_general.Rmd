@@ -1,0 +1,149 @@
+---
+title: "Mom Data"
+author: "HP"
+date: "10/23/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## library
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(phyloseq)
+library(qiime2R)
+library(knitr)
+library(readxl)
+library(ggrepel)
+library(nlme)
+library(effects)
+library(lme4)
+library(lmerTest)
+library(picante)
+library(Hmisc)
+library(agricolae)
+```
+
+## set path
+```{r}
+path_rec <- "~/Dropbox/IFNH CSR/ExperimentRecords/"
+list.files(path_rec)
+```
+
+## settings
+```{r}
+BirthMode_color = c("VF"="#377EB8", "CSR"="#4DAF4A", "CS"="#E41A1C")
+```
+
+## import into phyloseq
+```{r}
+phylo_all = qza_to_phyloseq(features = paste0(path_rec, "processed_16Sdata/table.qza"),
+                         taxonomy = paste0(path_rec, "processed_16Sdata/taxonomy_silva132.qza"),
+                         tree =  paste0(path_rec, "processed_16Sdata/rooted_tree.qza"),
+                         metadata = paste0(path_rec, "processed_16Sdata/meta_csr.txt"))
+```
+
+## sequence depth
+```{r}
+my_summarize = function(x){
+  data.frame(
+             N = n(),
+             Min = min(x,na.rm = T),
+             Q5 = quantile(x, probs = 0.05, na.rm = T),
+             Q10 = quantile(x, probs = 0.1, na.rm = T),
+             Q25 = quantile(x, probs = 0.25, na.rm = T),
+             Med = median(x, na.rm = T),
+             Mean = mean(x, na.rm = T),
+             Q75 = quantile(x, probs = 0.75, na.rm = T),
+             Q95 = quantile(x, probs = 0.95, na.rm = T),
+             Max = max(x,na.rm = T)
+             )
+}
+
+sample_sums(phylo_all) %>% as.data.frame() %>% summarise(my_summarize(.))
+```
+
+## metadata
+```{r}
+meta_all = phylo_all@sam_data@.Data %>% as.data.frame()
+names(meta_all) = phylo_all@sam_data@names
+meta_all$Sample_name = phylo_all@sam_data@row.names
+meta_all$Seq_count = sample_sums(phylo_all)
+```
+
+## rarefy
+according to the seqence depth summary, set the sequence depth to 3100
+```{r message=FALSE, warning=FALSE}
+phylo_rf = rarefy_even_depth(phylo_all, sample.size = 3100, rngseed = 1, replace = F, )
+```
+
+## alpha diversity
+### calculate alpha diversity
+```{r}
+
+a1 = pd(t(phylo_rf@otu_table@.Data), phylo_rf@phy_tree, include.root = F)
+a2 = estimate_richness(phylo_rf, measures="Shannon")
+
+alpha = merge(a1, a2, by=0)
+names(alpha) = c("Sample_name", "Faith_PD", "Observed_feature","Shannon")
+
+alpha = alpha %>% left_join(meta_all, by = "Sample_name") %>%
+  filter(!is.na(MouseID))
+```
+
+### compare diversity by week and birthmode
+```{r}
+sort(unique(dat$TimePointInWeeks))
+time_point = 3
+sex = "M"
+y = "Faith_PD"
+x = "BirthMode"
+dat = alpha %>% filter(Generation == "F1")
+wdat = dat %>% filter(TimePointInWeeks == time_point, Sex == sex)
+
+kw_and_CI = function(wdat, x, y){
+  wk = wdat %>% split(., .[x])
+  out1 = sapply(wk, function(df){smean.cl.boot(df[y], conf.int = .95)}) %>% t() %>% as.data.frame() %>% rownames_to_column(var = x)
+  ktest = kruskal(wdat[y], wdat[x], alpha = 0.05, p.adj="none", group=T, main = "wdat", console=FALSE)
+  out2 = ktest$groups %>% rownames_to_column(var = all_of(x)) %>% select(x, groups)
+  out1 = out1 %>% left_join(out2, by = x )
+  out1
+}
+
+res_summary = data.frame(BirthMode = NA, Mean = NA, Lower = NA, Upper = NA, groups = NA, Weeks = NA, Sex = NA, alpha_metrics = NA ) 
+for(time_point in sort(unique(dat$TimePointInWeeks))){
+  for(sex in unique(dat$Sex)){
+    wdat = dat %>% filter(TimePointInWeeks == time_point, Sex == sex) 
+    for (alpha_metrics in c("Faith_PD", "Observed_feature", "Shannon")){
+      res = kw_and_CI(wdat = wdat, x = "BirthMode", y = alpha_metrics)
+      res$Weeks = time_point
+      res$Sex = sex
+      res$alpha_metrics = alpha_metrics
+      res_summary = rbind(res_summary, res)
+    }  
+  }
+} 
+res_summary = res_summary %>% filter(!is.na(BirthMode))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
