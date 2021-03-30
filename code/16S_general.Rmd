@@ -24,18 +24,25 @@ library(lmerTest)
 library(picante)
 library(Hmisc)
 library(agricolae)
+library(vegan)
+library(ape)
+library(usedist)
+library(grid)
+library(gridExtra)
+library(gtable)
 ```
 
 ## settings
 ### set path
 ```{r}
-path_rec <- "~/Dropbox/IFNH CSR/ExperimentRecords/"
-list.files(path_rec)
+path_rec = "~/Dropbox/IFNH CSR/ExperimentRecords/"
+temp_out = "~/Dropbox/Rutgers/20210328_RUN_33_IFNH_CSR/output/"
 ```
 
-### set colors
+### set colors, labs and so on
 ```{r}
 BirthMode_color = c("VF"="#377EB8", "CSR"="#4DAF4A", "CS"="#E41A1C")
+Sex_labs = c("F" = "Female", "M" = "Male")
 ```
 
 ### import into phyloseq
@@ -72,11 +79,12 @@ names(meta_all) = phylo_all@sam_data@names
 meta_all$Sample_name = phylo_all@sam_data@row.names
 meta_all$Seq_count = sample_sums(phylo_all)
 table(meta_all$BirthMode,meta_all$TimePointInWeeks)
-
-
-
-
-
+meta_all = meta_all %>% mutate(TimePoint = case_when(TimePointInWeeks == 3 ~ "Week3",
+                                          TimePointInWeeks == 6 ~ "Week6",
+                                          TimePointInWeeks == 18 ~ "Week18",
+                                          TimePointInWeeks %in% c(9,11,12,14) ~ "Week9-14"))
+meta_all$TimePoint = factor(meta_all$TimePoint, levels = c("Week3","Week6","Week9-14","Week18"),ordered = T)
+table(meta_all$BirthMode,meta_all$TimePoint)
 ```
 
 ### rarefy
@@ -105,7 +113,7 @@ dist_wunif = UniFrac(phylo_rf, weighted = T)
 ### save temp data
 ```{r}
 save(meta_all, alpha, dist_uwunif, dist_wunif, phylo_all, phylo_rf,
-     BirthMode_color,
+     BirthMode_color, Sex_labs,
      file = paste0(path_rec, "processed_16Sdata/temp.RData"))
 ```
 
@@ -114,8 +122,8 @@ save(meta_all, alpha, dist_uwunif, dist_wunif, phylo_all, phylo_rf,
 load(file = paste0(path_rec, "processed_16Sdata/temp.RData"))
 ```
 
-## compare alpha diversity by week and birthmode
-### kruskal wallis test
+## alpha diversity
+### kruskal wallis test by birthmode 
 ```{r}
 dat = alpha %>% filter(Generation == "F1")
 
@@ -127,8 +135,8 @@ kw_and_CI = function(wdat, x, y){
   out1 = out1 %>% left_join(out2, by = x )
   out1
 }
-
-res_summary = data.frame(BirthMode = NA, Mean = NA, Lower = NA, Upper = NA, groups = NA, Weeks = NA, Sex = NA, alpha_metrics = NA ) 
+### by TimePointInWeeks
+res_summary = data.frame(BirthMode = NA, Mean = NA, Lower = NA, Upper = NA, groups = NA, Weeks = NA, Sex = NA, alpha_metrics = NA )
 for(time_point in sort(unique(dat$TimePointInWeeks))){
   for(sex in unique(dat$Sex)){
     wdat = dat %>% filter(TimePointInWeeks == time_point, Sex == sex) 
@@ -143,23 +151,175 @@ for(time_point in sort(unique(dat$TimePointInWeeks))){
 } 
 res_summary = res_summary %>% filter(!is.na(BirthMode))
 
-p = ggplot(data = res_summary %>% filter(alpha_metrics == "Faith_PD"), 
+for (a in c("Faith_PD", "Observed_feature", "Shannon")){
+  p = ggplot(data = res_summary %>% filter(alpha_metrics == a), 
            aes(x = Weeks, y = Mean, ymin = Lower, ymax = Upper, color = BirthMode)) + 
-  geom_line(aes(group = BirthMode)) +
-  geom_ribbon(aes(group = BirthMode, fill = BirthMode), alpha = 0.2) + 
-  facet_wrap(~Sex)
+    geom_line(aes(group = BirthMode),size = 1.5) + 
+    scale_x_continuous(breaks = c(3,6,9,11,12,14,18)) +
+    labs(x = "Age Weeks", y = a) + 
+    scale_color_manual(values = BirthMode_color, aesthetics = c("color","fill")) + 
+    geom_ribbon(aes(group = BirthMode, fill = BirthMode), alpha = 0.2) + 
+    facet_wrap(~Sex, labeller = labeller(Sex = Sex_labs))
+  ggsave(filename = paste0(temp_out,"alpha_by_weeks/weeks_ribbon_",a,".png"),
+         plot = p, width = 16, height = 12, units = "cm", dpi = 300)  
+    
+  p = ggplot(data = alpha %>% filter(Generation == "F1"),
+           aes(x = factor(TimePointInWeeks), y = get(a), color = BirthMode)) + 
+    geom_boxplot() + 
+    labs(x = "Age Weeks", y = a) + 
+    scale_color_manual(values = BirthMode_color, aesthetics = c("color","fill")) + 
+    facet_wrap(~Sex, labeller = labeller(Sex = Sex_labs))
+    ggsave(filename = paste0(temp_out,"alpha_by_weeks/weeks_boxplot_",a,".png"),
+         plot = p, width = 16, height = 12, units = "cm", dpi = 300)  
+}
 
-p = ggplot(data = alpha %>% filter(Generation == "F1"),
-           aes(x = factor(TimePointInWeeks), y = Faith_PD, color = BirthMode)) + 
-  geom_boxplot() + 
-  facet_wrap(~Sex)
+### by TimePoint
+res_summary2 = data.frame(BirthMode = NA, Mean = NA, Lower = NA, Upper = NA, groups = NA, Weeks = NA, Sex = NA, alpha_metrics = NA )
+for(time_point in sort(unique(dat$TimePoint))){
+  for(sex in unique(dat$Sex)){
+    wdat = dat %>% filter(TimePoint == time_point, Sex == sex) 
+    for (alpha_metrics in c("Faith_PD", "Observed_feature", "Shannon")){
+      res = kw_and_CI(wdat = wdat, x = "BirthMode", y = alpha_metrics)
+      res$Weeks = time_point
+      res$Sex = sex
+      res$alpha_metrics = alpha_metrics
+      res_summary2 = rbind(res_summary2, res)
+    }  
+  }
+} 
+res_summary2 = res_summary2 %>% filter(!is.na(BirthMode))
+res_summary2$Weeks = factor(res_summary2$Weeks, levels = c("Week3","Week6","Week9-14","Week18"),ordered = T)
 
-
+for (a in c("Faith_PD", "Observed_feature", "Shannon")){
+  p = ggplot(data = res_summary2 %>% filter(alpha_metrics == a), 
+           aes(x = Weeks, y = Mean, ymin = Lower, ymax = Upper, color = BirthMode)) + 
+    geom_line(aes(group = BirthMode),size = 1.5) + 
+    labs(x = "Age Weeks", y = a) + 
+    scale_color_manual(values = BirthMode_color, aesthetics = c("color","fill")) + 
+    geom_ribbon(aes(group = BirthMode, fill = BirthMode), alpha = 0.2) + 
+    facet_wrap(~Sex, labeller = labeller(Sex = Sex_labs))
+  ggsave(filename = paste0(temp_out,"alpha_by_weeks/week_f4_ribbon_",a,".png"),
+         plot = p, width = 16, height = 12, units = "cm", dpi = 300)  
+    
+  p = ggplot(data = alpha %>% filter(Generation == "F1"),
+           aes(x = factor(TimePoint), y = get(a), color = BirthMode)) + 
+    geom_boxplot() + 
+    labs(x = "Age Weeks", y = a) + 
+    scale_color_manual(values = BirthMode_color, aesthetics = c("color","fill")) + 
+    facet_wrap(~Sex, labeller = labeller(Sex = Sex_labs))
+    ggsave(filename = paste0(temp_out,"alpha_by_weeks/weeks_f4_boxplot_",a,".png"),
+         plot = p, width = 16, height = 12, units = "cm", dpi = 300)  
+}
 
 ```
 
+## beta diversity
+### PCoA
+```{r}
+sub_id = meta_all %>% filter(Generation == "F1") %>% select(Sample_name) %>% unlist()
+sub_id = intersect(sub_id, labels(dist_uwunif))
+wmeta = meta_all[pmatch(sub_id,meta_all$Sample_name),]
 
+D_id = "dist_uwunif"
+for (D_id in c("dist_uwunif", "dist_wunif")){
+  wdist = dist_subset(get(D_id),sub_id)
+  dtitle = ifelse (D_id == "dist_uwunif", "Unweighted UniFrac", "Weighted UniFrac")
+  set.seed(1)
+  x = as.data.frame(adonis2(wdist ~ BirthMode + TimePoint, data = wmeta, by = "margin"))
+  x = x[which(!(rownames(x) %in% c("Residual","Total"))),]
+  x$SumOfSqs = round(x$SumOfSqs,4)
+  x$F = round(x$F,4)
+  x$`Pr(>F)` = round(x$`Pr(>F)`,4)
+  x$R2 = paste0(round(x$R2*100,2), " %")
 
+  wpcoa = pcoa(wdist)
+  varPC1 <- round(wpcoa$values$Relative_eig[1]*100, 2)
+  varPC2 <- round(wpcoa$values$Relative_eig[2]*100, 2)
+  varPC3 <- round(wpcoa$values$Relative_eig[3]*100, 2)
+  wdat = merge(wpcoa$vectors[,1:2],wmeta, by.x = 0, by.y = "Sample_name")
+  
+  xmin = min(wdat$Axis.1) - 0.2 * sum(abs(range(wdat$Axis.1)))
+  xmax = max(wdat$Axis.1) + 0.2 * sum(abs(range(wdat$Axis.1)))
+  ymin = min(wdat$Axis.2) - 0.2 * sum(abs(range(wdat$Axis.2)))
+  ymax = max(wdat$Axis.2) + 0.4 * sum(abs(range(wdat$Axis.2)))
+  
+  p = ggplot(wdat, aes(x = Axis.1, y = Axis.2, color = BirthMode)) + 
+    geom_point(alpha = 0.8, size = 4) + 
+    stat_ellipse() + 
+    scale_x_continuous(limits = c(xmin, xmax)) +
+    scale_y_continuous(limits = c(ymin, ymax)) + 
+    scale_color_manual(values = BirthMode_color, aesthetics = c("color","fill")) +
+    labs(x = paste0("PC1: ", varPC1, "% explained variation"),
+           y = paste0("PC2: ", varPC2, "% explained variation"),
+           title = paste("PcoA by Birth Mode", dtilte, sep = " ")) + 
+    theme_bw() + theme(panel.background = element_rect(fill = NA), 
+                       plot.title = element_text(hjust = 0.5), 
+                       text = element_text(face = 'bold'),
+                       axis.text = element_text(size = 8),
+                       axis.title = element_text(size = 10),
+                       strip.text = element_text(size=10),
+                       legend.text = element_text(size=10),
+                       legend.title = element_text(size=10),
+                       title = element_text(size=12))
+    p = p + annotation_custom(grob = tableGrob(x, theme = ttheme_minimal(base_size = 10)),
+                     xmin = xmin + 0.05*sum(abs(c(xmin,xmax))), xmax = xmax - 0.05*sum(abs(c(xmin,xmax))),
+                     ymin = ymax - 0.1*sum(abs(c(ymin,ymax))), ymax = ymax)
+  ggsave(filename = paste0(temp_out,"beta_by_weeks/","All_Weeks_",dtitle,".png"),
+         plot = p, width = 16, height = 12, units = "cm", dpi = 300)
+
+  for (time_point in sort(unique(dat$TimePoint))) {
+    wwmeta = wmeta %>% filter(TimePoint == time_point)
+    wwdist = dist_subset(wdist,wwmeta$Sample_name)
+    set.seed(1)
+    x = as.data.frame(adonis2(wwdist ~ BirthMode, data = wwmeta, by = "margin"))
+    x = x[which(!(rownames(x) %in% c("Residual","Total"))),]
+    x$SumOfSqs = round(x$SumOfSqs,4)
+    x$F = round(x$F,4)
+    x$`Pr(>F)` = round(x$`Pr(>F)`,4)
+    x$R2 = paste0(round(x$R2*100,4), " %")
+      
+    wwpcoa = pcoa(wwdist)
+    varPC1 <- round(wwpcoa$values$Relative_eig[1]*100, 2)
+    varPC2 <- round(wwpcoa$values$Relative_eig[2]*100, 2)
+    varPC3 <- round(wwpcoa$values$Relative_eig[3]*100, 2)
+    wwdat = merge(wwpcoa$vectors[,1:2],wwmeta, by.x = 0, by.y = "Sample_name")
+  
+    xmin = min(wwdat$Axis.1) - 0.2 * sum(abs(range(wwdat$Axis.1)))
+    xmax = max(wwdat$Axis.1) + 0.2 * sum(abs(range(wwdat$Axis.1)))
+    ymin = min(wwdat$Axis.2) - 0.2 * sum(abs(range(wwdat$Axis.2)))
+    ymax = max(wwdat$Axis.2) + 0.4 * sum(abs(range(wwdat$Axis.2)))
+    
+    p = ggplot(wwdat, aes(x = Axis.1, y = Axis.2, color = BirthMode)) + 
+      geom_point(alpha = 0.8, size = 4) + 
+      stat_ellipse() + 
+      scale_x_continuous(limits = c(xmin, xmax)) +
+      scale_y_continuous(limits = c(ymin, ymax)) + 
+      scale_color_manual(values = BirthMode_color, aesthetics = c("color","fill")) +
+      labs(x = paste0("PC1: ", varPC1, "% explained variation"),
+           y = paste0("PC2: ", varPC2, "% explained variation"),
+           title = paste("PcoA at", time_point, dtilte, sep = " ")) + 
+      theme_bw() + theme(panel.background = element_rect(fill = NA), 
+                       plot.title = element_text(hjust = 0.5), 
+                       text = element_text(face = 'bold'),
+                       axis.text = element_text(size = 8),
+                       axis.title = element_text(size = 10),
+                       strip.text = element_text(size=10),
+                       legend.text = element_text(size=10),
+                       legend.title = element_text(size=10),
+                       title = element_text(size=12))
+    p = p + annotation_custom(grob = tableGrob(x, theme = ttheme_minimal(base_size = 10)),
+                     xmin = xmin + 0.05*sum(abs(c(xmin,xmax))), xmax = xmax - 0.05*sum(abs(c(xmin,xmax))),
+                     ymin = ymax - 0.1*sum(abs(c(ymin,ymax))), ymax = ymax)
+    ggsave(filename = paste0(temp_out,"beta_by_weeks/",time_point,"_",dtitle,".png"),
+         plot = p, width = 16, height = 12, units = "cm", dpi = 300)
+  }
+}
+```
+
+### PC1 by weeks
+```{r}
+
+```
 
 
 
