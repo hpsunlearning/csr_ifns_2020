@@ -26,18 +26,19 @@ library(Hmisc)
 library(agricolae)
 ```
 
-## set path
+## settings
+### set path
 ```{r}
 path_rec <- "~/Dropbox/IFNH CSR/ExperimentRecords/"
 list.files(path_rec)
 ```
 
-## settings
+### set colors
 ```{r}
 BirthMode_color = c("VF"="#377EB8", "CSR"="#4DAF4A", "CS"="#E41A1C")
 ```
 
-## import into phyloseq
+### import into phyloseq
 ```{r}
 phylo_all = qza_to_phyloseq(features = paste0(path_rec, "processed_16Sdata/table.qza"),
                          taxonomy = paste0(path_rec, "processed_16Sdata/taxonomy_silva132.qza"),
@@ -45,7 +46,7 @@ phylo_all = qza_to_phyloseq(features = paste0(path_rec, "processed_16Sdata/table
                          metadata = paste0(path_rec, "processed_16Sdata/meta_csr.txt"))
 ```
 
-## sequence depth
+### sequence depth
 ```{r}
 my_summarize = function(x){
   data.frame(
@@ -61,53 +62,68 @@ my_summarize = function(x){
              Max = max(x,na.rm = T)
              )
 }
-
 sample_sums(phylo_all) %>% as.data.frame() %>% summarise(my_summarize(.))
 ```
 
-## metadata
+### metadata
 ```{r}
 meta_all = phylo_all@sam_data@.Data %>% as.data.frame()
 names(meta_all) = phylo_all@sam_data@names
 meta_all$Sample_name = phylo_all@sam_data@row.names
 meta_all$Seq_count = sample_sums(phylo_all)
+table(meta_all$BirthMode,meta_all$TimePointInWeeks)
+
+
+
+
+
 ```
 
-## rarefy
+### rarefy
 according to the seqence depth summary, set the sequence depth to 3100
 ```{r message=FALSE, warning=FALSE}
 phylo_rf = rarefy_even_depth(phylo_all, sample.size = 3100, rngseed = 1, replace = F, )
 ```
 
-## alpha diversity
-### calculate alpha diversity
+### alpha diversity
 ```{r}
-
 a1 = pd(t(phylo_rf@otu_table@.Data), phylo_rf@phy_tree, include.root = F)
 a2 = estimate_richness(phylo_rf, measures="Shannon")
 
 alpha = merge(a1, a2, by=0)
 names(alpha) = c("Sample_name", "Faith_PD", "Observed_feature","Shannon")
 
-alpha = alpha %>% left_join(meta_all, by = "Sample_name") %>%
-  filter(!is.na(MouseID))
+alpha = alpha %>% left_join(meta_all, by = "Sample_name")
 ```
 
-### compare diversity by week and birthmode
+### beta diversity
 ```{r}
-sort(unique(dat$TimePointInWeeks))
-time_point = 3
-sex = "M"
-y = "Faith_PD"
-x = "BirthMode"
+dist_uwunif = UniFrac(phylo_rf, weighted = F)
+dist_wunif = UniFrac(phylo_rf, weighted = T)
+```
+
+### save temp data
+```{r}
+save(meta_all, alpha, dist_uwunif, dist_wunif, phylo_all, phylo_rf,
+     BirthMode_color,
+     file = paste0(path_rec, "processed_16Sdata/temp.RData"))
+```
+
+### load temp data
+```{r}
+load(file = paste0(path_rec, "processed_16Sdata/temp.RData"))
+```
+
+## compare alpha diversity by week and birthmode
+### kruskal wallis test
+```{r}
 dat = alpha %>% filter(Generation == "F1")
-wdat = dat %>% filter(TimePointInWeeks == time_point, Sex == sex)
 
 kw_and_CI = function(wdat, x, y){
   wk = wdat %>% split(., .[x])
   out1 = sapply(wk, function(df){smean.cl.boot(df[y], conf.int = .95)}) %>% t() %>% as.data.frame() %>% rownames_to_column(var = x)
   ktest = kruskal(wdat[y], wdat[x], alpha = 0.05, p.adj="none", group=T, main = "wdat", console=FALSE)
-  out2 = ktest$groups %>% rownames_to_column(var = all_of(x)) %>% select(x, groups)
+  out2 = ktest$groups %>% rownames_to_column(var = x) %>% select(all_of(x), groups)
   out1 = out1 %>% left_join(out2, by = x )
   out1
 }
@@ -127,8 +143,20 @@ for(time_point in sort(unique(dat$TimePointInWeeks))){
 } 
 res_summary = res_summary %>% filter(!is.na(BirthMode))
 
-```
+p = ggplot(data = res_summary %>% filter(alpha_metrics == "Faith_PD"), 
+           aes(x = Weeks, y = Mean, ymin = Lower, ymax = Upper, color = BirthMode)) + 
+  geom_line(aes(group = BirthMode)) +
+  geom_ribbon(aes(group = BirthMode, fill = BirthMode), alpha = 0.2) + 
+  facet_wrap(~Sex)
 
+p = ggplot(data = alpha %>% filter(Generation == "F1"),
+           aes(x = factor(TimePointInWeeks), y = Faith_PD, color = BirthMode)) + 
+  geom_boxplot() + 
+  facet_wrap(~Sex)
+
+
+
+```
 
 
 
