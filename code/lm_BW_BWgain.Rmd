@@ -5,8 +5,7 @@ date: "7/2/2020"
 output: html_document
 ---
 
-## Preparation
-1. Setup
+## library
 ```{r setup, message=FALSE, warning=FALSE}
 # Loading library here
 library(knitr)
@@ -17,33 +16,35 @@ library(nlme)
 library(effects)
 library(lme4)
 library(lmerTest)
+library(tidyverse)
+library(phyloseq)
+library(qiime2R)
+library(picante)
+library(Hmisc)
+library(agricolae)
+library(vegan)
+library(ape)
+library(usedist)
+library(grid)
+library(gridExtra)
+library(gtable)
 # library(ggpubr)
-
-options(max.print="75")
-knitr::opts_chunk$set(echo = TRUE, cache = TRUE, warning = FALSE, prompt=FALSE, tidy = TRUE, comment = NA, message = FALSE)
-opts_knit$set(width=75)
-
-# set path
-#opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
-#setwd(rprojroot::find_rstudio_root_file())
-## path to data record on dropbox
-path_rec <- "~/Dropbox/IFNH CSR/ExperimentRecords/"
-list.files(path_rec)
-
-# number of cores/thread to use
-nc <- switch(Sys.info()[['sysname']], Windows = 1, Darwin = 4, Linux = 12)
-
-#source("~/Dropbox/42-JCHWANG-RUTGERS/Projects-Rutgers/Src/utils.R")
-
-#sessionInfo()
 ```
 
 ## settings
+### set path
 ```{r}
-BirthMode_color = c("VF"="#377EB8", "CSR"="#4DAF4A", "CS"="#E41A1C")
+path_rec = "~/Dropbox/IFNH CSR/ExperimentRecords/"
+temp_out = "~/Dropbox/Rutgers/20210328_RUN_33_IFNH_CSR/output/"
 ```
 
-## functions
+### set colors, labs and so on
+```{r}
+BirthMode_color = c("VF"="#377EB8", "CSR"="#4DAF4A", "CS"="#E41A1C")
+Sex_labs = c("F" = "Female", "M" = "Male")
+```
+
+### functions
 ```{r}
 
 ```
@@ -66,7 +67,7 @@ p = ggplot(BW, aes(x = TimePoint_Days, y = Weight_g, color = BirthMode)) +
     geom_path(aes(group = MouseNo), color = "grey", size = 0.5, alpha = 0.5) +
     geom_smooth(aes(fill = BirthMode), alpha = 0.3) +
     geom_text_repel(data = BW_sum, aes(x = TimePoint_Days, y = Mean, label = N), size = 4, show.legend = F) +
-    facet_grid(.~Sex) +
+    facet_grid(.~Sex,labeller = labeller(Sex = Sex_labs)) +
     scale_x_continuous(breaks = c(seq(7, current_days, 7)), labels = c(seq(7, current_days, 7))/7) + 
     scale_y_continuous(breaks = seq(2, y_max, 4)) +
     scale_color_manual(values = BirthMode_color, aesthetics = c("fill", "colour")) +
@@ -79,34 +80,36 @@ BW_sum2 <- BW %>% group_by(TimePoint_Weeks, BirthMode, Sex) %>% summarise(N = n(
 
 BW_sum2 %>% mutate(Count = paste0(N, "(", N_family, ")")) %>% select(BirthMode, Sex, TimePoint_Weeks, Count) %>% spread(key = TimePoint_Weeks, value = Count)
 ```
-
-### LMM
+### LitterSize
 ```{r}
-fit = lm(Weight_g ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, data = BW)
+a = BW %>% select(FamilyID, LitterSize_Born, LitterSize_InProject) %>% unique()
+cor(a$LitterSize_Born,a$LitterSize_InProject)
+```
+
+### LMM on bodyweight
+```{r}
+fit = lm(Weight_g ~ TimePoint_Weeks*BirthMode + Sex + LitterSize_Born, data = BW)
 summary(fit)
 
-
-fit_lme4 = lmer(Weight_g ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject + (1|MouseID), data = BW)
+fit_lme4 = lmer(Weight_g ~ TimePoint_Weeks*BirthMode + Sex + (1|MouseID), data = BW,
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
 summary(fit_lme4)
 anova(fit_lme4)
-rand(fit_lme4)
 
-fit_lme4_f1 = lmer(Weight_g ~ TimePoint_Weeks + BirthMode + covid + (1|MouseID), data = BW %>% filter(Sex == "F"))
+fit_lme4_f1 = lmer(Weight_g ~ TimePoint_Weeks*BirthMode  + (1|MouseID), data = BW %>% filter(Sex == "F"),
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
 summary(fit_lme4_f1)
 anova(fit_lme4_f1)
-rand(fit_lme4_f1)
 
-fit_lme4_f2 = lmer(Weight_g ~ TimePoint_Weeks*BirthMode + covid + (1|MouseID), data = BW %>% filter(Sex == "F"))
+fit_lme4_f2 = lmer(Weight_g ~ TimePoint_Weeks*BirthMode + (TimePoint_Weeks|MouseID), data = BW %>% filter(Sex == "F"),
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
 summary(fit_lme4_f2)
 anova(fit_lme4_f2)
-rand(fit_lme4_f2)
 
-fit_lme4_f3 = lmer(Weight_g ~ TimePoint_Weeks*BirthMode + covid + (TimePoint_Weeks|MouseID), data = BW %>% filter(Sex == "F"))
-summary(fit_lme4_f3)
-anova(fit_lme4_f3)
-rand(fit_lme4_f3)
-
-
+fit_lme4_m2 = lmer(Weight_g ~ TimePoint_Weeks*BirthMode + (TimePoint_Weeks|MouseID), data = BW %>% filter(Sex == "M"),
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
+summary(fit_lme4_m2)
+anova(fit_lme4_m2)
 ```
 
 
@@ -115,6 +118,27 @@ rand(fit_lme4_f3)
 BWgain= BW %>% filter(TimePoint_Weeks > 2) %>% arrange(MouseID, TimePoint_Weeks) %>% group_by(MouseID) %>% mutate(BW_gain = Weight_g - Weight_g[1], BW_gain_percent = BW_gain/Weight_g[1],N = n()) %>% filter(TimePoint_Weeks > 3, N > 3)
 
 BWgain_sum <- BWgain %>% group_by(TimePoint_Weeks, BirthMode, Sex) %>% summarise(N = n(), N_batch = unique(Batch) %>% length, N_family = unique(FamilyNo) %>% length(), Mean = mean(BW_gain_percent), SE = sd(BW_gain_percent)/sqrt(N))
+
+
+p = ggplot(BWgain, aes(x = TimePoint_Weeks, y = BW_gain, color = BirthMode)) +
+    geom_point(size = 0.5, alpha = 0.5) +
+    geom_path(aes(group = MouseID), color = "grey", size = 0.5, alpha = 0.5) +
+    geom_smooth(aes(fill = BirthMode), alpha = 0.3) +
+    facet_grid(.~Sex,labeller = labeller(Sex = Sex_labs)) +
+    scale_x_continuous(breaks = c(4:18)) + 
+    scale_y_continuous(breaks = seq(2, y_max, 4)) +
+    scale_color_manual(values = BirthMode_color, aesthetics = c("fill", "colour")) +
+    labs(x = "Sampling_Week", y = "Body Weight gain (g)", title = "") 
+
+p = ggplot(BWgain, aes(x = TimePoint_Weeks, y = BW_gain_percent, color = BirthMode)) +
+    geom_point(size = 0.5, alpha = 0.5) +
+    geom_path(aes(group = MouseID), color = "grey", size = 0.5, alpha = 0.5) +
+    geom_smooth(aes(fill = BirthMode), alpha = 0.3) +
+    facet_grid(.~Sex,labeller = labeller(Sex = Sex_labs)) +
+    scale_x_continuous(breaks = c(4:18)) + 
+    scale_y_continuous(breaks = seq(2, y_max, 4)) +
+    scale_color_manual(values = BirthMode_color, aesthetics = c("fill", "colour")) +
+    labs(x = "Sampling_Week", y = "Body Weight gain (%)", title = "") 
 
 p = ggplot(BWgain_sum, aes(x = TimePoint_Weeks, y = Mean, color = BirthMode)) + 
     geom_point() + 
@@ -127,70 +151,65 @@ p = ggplot(BWgain_sum, aes(x = TimePoint_Weeks, y = Mean, color = BirthMode)) +
 
 ### LMM BW_gain
 ```{r}
-fitgain = lm(BW_gain ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, data = BWgain)
+fitgain = lm(BW_gain ~ TimePoint_Weeks*BirthMode + Sex + LitterSize_Born, data = BWgain)
 summary(fitgain)
 
-fitgain_lme4 = lmer(BW_gain ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject + (1|MouseID), data = BWgain)
+fitgain_lme4 = lmer(BW_gain ~ TimePoint_Weeks*BirthMode + Sex + (1|MouseID), data = BWgain,
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
 summary(fitgain_lme4)
 allEffects(fitgain_lme4)
 anova(fitgain_lme4)
-rand(fitgain_lme4)
 
-fitgain_lme4_f1 = lmer(BW_gain ~ TimePoint_Weeks + BirthMode + covid + (1|MouseID), data =  BWgain %>% filter(Sex == "F"))
+fitgain_lme4_f1 = lmer(BW_gain ~ TimePoint_Weeks*BirthMode + (1|MouseID), data =  BWgain %>% filter(Sex == "F"),
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
 summary(fitgain_lme4_f1)
 allEffects(fitgain_lme4_f1)
 anova(fitgain_lme4_f1)
-rand(fitgain_lme4_f1)
 
-fitgain_lme4_f2 = lmer(BW_gain ~ TimePoint_Weeks*BirthMode + covid + (1|MouseID), data =  BWgain %>% filter(Sex == "F"))
+fitgain_lme4_f2 = lmer(BW_gain ~ TimePoint_Weeks*BirthMode + (TimePoint_Weeks|MouseID), data =  BWgain %>% filter(Sex == "F"),
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
 summary(fitgain_lme4_f2)
 allEffects(fitgain_lme4_f2)
 anova(fitgain_lme4_f2)
-rand(fitgain_lme4_f2)
 
-fitgain_lme4_f3 = lmer(BW_gain ~ TimePoint_Weeks*BirthMode + covid + (TimePoint_Weeks|MouseID), data =  BWgain %>% filter(Sex == "F"))
-summary(fitgain_lme4_f3)
-allEffects(fitgain_lme4_f3)
-anova(fitgain_lme4_f3)
-rand(fitgain_lme4_f3)
-
+fitgain_lme4_m2 = lmer(BW_gain ~ TimePoint_Weeks*BirthMode + (TimePoint_Weeks|MouseID), data =  BWgain %>% filter(Sex == "M"),
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
+summary(fitgain_lme4_m2)
+allEffects(fitgain_lme4_m2)
+anova(fitgain_lme4_m2)
 ```
 
 ### LMM BW_gain_percent
 ```{r}
-fitgainp = lm(BW_gain_percent ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject, data = BWgain)
+fitgainp = lm(BW_gain_percent ~ TimePoint_Weeks*BirthMode + Sex + LitterSize_Born, data = BWgain)
 summary(fitgainp)
-allEffects(fitgainp)
 
-fitgainp_lme4 = lmer(BW_gain_percent ~ TimePoint_Weeks + BirthMode + Sex + covid + LitterSize_Born + LitterSize_InProject + (1|MouseID), data = BWgain)
+fitgainp_lme4 = lmer(BW_gain_percent ~ TimePoint_Weeks*BirthMode + Sex + (1|MouseID), data = BWgain,
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
 summary(fitgainp_lme4)
-allEffects(fitgainp_lme4)
 anova(fitgainp_lme4)
-rand(fitgainp_lme4)
 
-fitgainp_lme4_f1 = lmer(BW_gain_percent ~ TimePoint_Weeks + BirthMode + covid + (1|MouseID), data = BWgain %>% filter(Sex == "F"))
+fitgainp_lme4_f1 = lmer(BW_gain_percent ~ TimePoint_Weeks*BirthMode + (1|MouseID), data = BWgain %>% filter(Sex == "F"),
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
 summary(fitgainp_lme4_f1)
-allEffects(fitgainp_lme4_f1)
 anova(fitgainp_lme4_f1)
-rand(fitgainp_lme4_f1)
 
-fitgainp_lme4_f2 = lmer(BW_gain_percent ~ TimePoint_Weeks*BirthMode + covid + (1|MouseID), data = BWgain %>% filter(Sex == "F"))
+fitgainp_lme4_f2 = lmer(BW_gain_percent ~ TimePoint_Weeks*BirthMode + (TimePoint_Weeks|MouseID), data = BWgain %>% filter(Sex == "F"),
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
 summary(fitgainp_lme4_f2)
-allEffects(fitgainp_lme4_f2)
 anova(fitgainp_lme4_f2)
-rand(fitgainp_lme4_f2)
 
-fitgainp_lme4_f3 = lmer(BW_gain_percent ~ TimePoint_Weeks*BirthMode + covid + (TimePoint_Weeks|MouseID), data = BWgain %>% filter(Sex == "F"))
-summary(fitgainp_lme4_f3)
-allEffects(fitgainp_lme4_f3)
-anova(fitgainp_lme4_f3)
-rand(fitgainp_lme4_f3)
-
-
-
+fitgainp_lme4_m2 = lmer(BW_gain_percent ~ TimePoint_Weeks*BirthMode + (TimePoint_Weeks|MouseID), data = BWgain %>% filter(Sex == "M"),
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
+summary(fitgainp_lme4_m2)
+anova(fitgainp_lme4_m2)
 
 ```
 
+### predict BW_gain_percent
+```{r}
+
+```
 
 
 
