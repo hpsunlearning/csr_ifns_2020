@@ -12,11 +12,10 @@ library(knitr)
 library(tidyverse)
 library(readxl)
 library(ggrepel)
-library(nlme)
 library(effects)
 library(lme4)
+library(sjPlot)
 library(lmerTest)
-library(tidyverse)
 library(phyloseq)
 library(qiime2R)
 library(picante)
@@ -53,7 +52,7 @@ Sex_labs = c("F" = "Female", "M" = "Male")
 ### Overall, plotting all data
 ```{r}
 BW <- read_excel(paste0(path_rec, "MasterMetadata-CS-SW-Oct2019-20210224-HS.xlsx"), sheet = "BodyWeightRecords", range = "A1:T2009") %>% filter(!is.na(Weight_g))
-BW$BirthMode = factor(BW$BirthMode, levels = c("VF", "CSR", "CS"))
+BW$BirthMode = factor(BW$BirthMode, levels = c("CS", "CSR","VF"))
 BW = BW %>% mutate(covid = case_when(Batch %in% c("Batch9","Batch10") ~ "Post covid",
                                      TRUE ~ "Before covid"))
 
@@ -71,7 +70,9 @@ p = ggplot(BW, aes(x = TimePoint_Days, y = Weight_g, color = BirthMode)) +
     scale_x_continuous(breaks = c(seq(7, current_days, 7)), labels = c(seq(7, current_days, 7))/7) + 
     scale_y_continuous(breaks = seq(2, y_max, 4)) +
     scale_color_manual(values = BirthMode_color, aesthetics = c("fill", "colour")) +
-    labs(x = "Sampling_Week", y = "Body Weight(g)", title = "C-Section Restoration Project - Body Weight Plots-AllData") 
+    labs(x = "Sampling_Week", y = "Body Weight(g)", title = "C-Section Restoration Project - Body Weight Plots-AllData")
+ggsave(filename = paste0())
+
 ```
 
 ### Summary table
@@ -208,6 +209,30 @@ anova(fitgainp_lme4_m2)
 
 ### predict BW_gain_percent
 ```{r}
+dat_n = expand.grid(TimePoint_Weeks =  unique(BWgain$TimePoint_Weeks),
+                    BirthMode = unique(BWgain$BirthMode),
+                    MouseID = "rand")
+dat_n$BWgain_p_f = predict(fitgainp_lme4_f2, newdata = dat_n, allow.new.levels = T)
+dat_n$BWgain_p_m = predict(fitgainp_lme4_m2, newdata = dat_n, allow.new.levels = T)
+
+p = ggplot(dat_n, aes(x = TimePoint_Weeks, y = BWgain_p_f, color = BirthMode)) + 
+    geom_point() + 
+    geom_line(aes(group = BirthMode)) + 
+    scale_color_manual(values = BirthMode_color)
+
+p = plot_model(fitgainp_lme4_f2, type = "pred", terms = c("TimePoint_Weeks","BirthMode"), colors = BirthMode_color, ci.lvl = .95) + 
+    scale_y_continuous(limits = c(0.5, 3.8), breaks = c(1, 1.5, 2, 2.5, 3, 3.5),labels = scales::percent) + 
+    scale_x_continuous(breaks = c(4:18)) + 
+    labs(x = "Age Weeks", y = "Body Weight Gain (%)", title = "Predicted Value of Body Weight Gain of Female")
+
+p = plot_model(fitgainp_lme4_m2, type = "pred", terms = c("TimePoint_Weeks","BirthMode"), colors = BirthMode_color, ci.lvl = .95) + 
+    scale_y_continuous(limits = c(0.5, 3.8), breaks = c(1, 1.5, 2, 2.5, 3, 3.5),labels = scales::percent) + 
+    scale_x_continuous(breaks = c(4:18)) + 
+    labs(x = "Age Weeks", y = "Body Weight Gain (%)", title = "Predicted Value of Body Weight Gain of Male")
+
+
+
+
 
 ```
 
