@@ -274,6 +274,8 @@ BW_sum3 = BW %>% group_by(TimePoint_Weeks, BirthMode, Sex) %>%
               SD = sd(Weight_g),
               r1SD.lo = Mean - SD,
               r1SD.hi = Mean + SD,
+              r1.5SD.lo = Mean - 1.5*SD,
+              r1.5SD.hi = Mean + 1.5*SD,
               r2SD.lo = Mean - 2*SD,
               r2SD.hi = Mean + 2*SD,
               boot.lo = smean.cl.boot(Weight_g, conf.int=.95)[2],
@@ -320,6 +322,23 @@ ggsave(filename = paste0(temp_out,"body_weight/VF_range_1SD_VF.png"), plot = p,
 p = ggplot(data = BW_sum3 %>% filter(BirthMode == "VF"),
             aes(x = TimePoint_Weeks, y = Mean, color = BirthMode)) + 
     geom_line(aes(group = BirthMode), size = 1.5) + 
+    geom_ribbon(aes(ymin = r1.5SD.lo, ymax = r1.5SD.hi, fill = BirthMode), alpha = 0.2) +
+    geom_point(data = BW %>% filter(BirthMode == "VF"), 
+               aes(x = TimePoint_Weeks, y = Weight_g),
+               size = 0.5, alpha = 0.3,  color = "gray50") + 
+    geom_line(data = BW %>% filter(BirthMode == "VF"), 
+               aes(x = TimePoint_Weeks, y = Weight_g, group = MouseID),
+              alpha = 0.5, size = 0.3, color = "gray50") + 
+    scale_x_continuous(breaks = c(1:18)) + 
+    scale_color_manual(values = BirthMode_color, aesthetics = c("colour", "fill")) + 
+    labs(x = "Age in Weeks", y = "Body Weight (g)", title = "Individul Body Weight and Mean+1.5SD range in VF") + 
+    facet_wrap(~Sex)
+ggsave(filename = paste0(temp_out,"body_weight/VF_range_1.5SD_VF.png"), plot = p,
+    width = 7, height = 5, units = "in", dpi = 300)
+
+p = ggplot(data = BW_sum3 %>% filter(BirthMode == "VF"),
+            aes(x = TimePoint_Weeks, y = Mean, color = BirthMode)) + 
+    geom_line(aes(group = BirthMode), size = 1.5) + 
     geom_ribbon(aes(ymin = r2SD.lo, ymax = r2SD.hi, fill = BirthMode), alpha = 0.2) +
     geom_point(data = BW %>% filter(BirthMode == "VF"), 
                aes(x = TimePoint_Weeks, y = Weight_g),
@@ -329,7 +348,7 @@ p = ggplot(data = BW_sum3 %>% filter(BirthMode == "VF"),
               alpha = 0.5, size = 0.3, color = "gray50") + 
     scale_x_continuous(breaks = c(1:18)) + 
     scale_color_manual(values = BirthMode_color, aesthetics = c("colour", "fill")) + 
-    labs(x = "Age in Weeks", y = "Body Weight (g)", title = "Individul Body Weight and Mean+1SD range in VF") + 
+    labs(x = "Age in Weeks", y = "Body Weight (g)", title = "Individul Body Weight and Mean+2SD range in VF") + 
     facet_wrap(~Sex)
 ggsave(filename = paste0(temp_out,"body_weight/VF_range_2SD_VF.png"), plot = p,
     width = 7, height = 5, units = "in", dpi = 300)
@@ -353,12 +372,16 @@ ggsave(filename = paste0(temp_out,"body_weight/VF_range_all3_VF.png"), plot = p,
 
 ```
 
-### set 95CI for responder
+### set 1.5SD of VF as normal weight range
 ```{r}
-BW2 = BW %>% left_join(BW_sum3 %>% filter(BirthMode == "VF") %>% select(TimePoint_Weeks, Sex, boot.hi), by=c("TimePoint_Weeks","Sex")) %>%
-    rename(VF.hi = boot.hi) %>%
-    mutate(CS_bigger = case_when(BirthMode == "CS" & Weight_g > VF.hi ~ "Y",
-                                 BirthMode == "CS" & Weight_g <= VF.hi ~ "N"))
+BW2 = BW %>% left_join(BW_sum3 %>% filter(BirthMode == "VF") %>% select(TimePoint_Weeks, Sex, r1.5SD.hi, r1.5SD.lo), by=c("TimePoint_Weeks","Sex")) %>%
+    rename(VF.hi = r1.5SD.hi, VF.lo = r1.5SD.lo) %>%
+    mutate(BW_grp = case_when(Weight_g > VF.hi ~ "Overweight",
+                              Weight_g < VF.lo ~ "Underweight",
+                              TRUE ~ "Normal"))
+
+
+
 
 BW_responder = BW2 %>% filter(BirthMode == "CS") %>% 
     group_by(MouseID,BirthMode) %>% 
@@ -383,14 +406,14 @@ p = ggplot(data = BW3) +
     geom_line(data = BW_sum3 %>% filter(BirthMode == "VF"),
               aes(x = TimePoint_Weeks, y = Mean, group = BirthMode), size = 1, color = "#377EB8") + 
     geom_ribbon(data = BW_sum3 %>% filter(BirthMode == "VF"),
-                aes(x = TimePoint_Weeks,ymin = boot.lo, ymax = boot.hi, group = BirthMode),fill = "#377EB8", alpha = 0.2) +
+                aes(x = TimePoint_Weeks,ymin = r1SD.lo, ymax = r1SD.hi, group = BirthMode),fill = "#377EB8", alpha = 0.2) +
     #above use data set BW_sum
     scale_x_continuous(breaks = c(1:18)) + 
 
     #above are common settings
     labs(x = "Age in Weeks", y = "Body Weight (g)") + 
     facet_wrap(~Sex)
-ggsave(filename = paste0(temp_out,"body_weight/VF_range_95CI_CS_responder.png"), plot = p,
+ggsave(filename = paste0(temp_out,"body_weight/VF_range_1SD_CS_responder.png"), plot = p,
     width = 7, height = 5, units = "in", dpi = 300)
 
 ```
