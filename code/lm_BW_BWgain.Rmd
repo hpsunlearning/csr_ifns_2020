@@ -7,7 +7,6 @@ output: html_document
 
 ## library
 ```{r setup, message=FALSE, warning=FALSE}
-# Loading library here
 library(knitr)
 library(tidyverse)
 library(readxl)
@@ -317,16 +316,25 @@ BW_responder = BW2 %>% filter(MouseID %in% mouse_kept_for_curve) %>%
                               uw_ratio_2SD > 0.5  ~ "Underweight",
                               TRUE ~ "Normal"))
 
+BW_responder2 = BW2 %>% filter(MouseID %in% mouse_kept_for_curve) %>% 
+  filter(TimePoint_Weeks == 15) %>% 
+  arrange(MouseID) %>%
+  mutate(BW_grp_15week = case_when(BW_status_1.5SD == "Overweight" ~ "Overweight",
+                              BW_status_1.5SD == "Underweight"  ~ "Underweight",
+                              TRUE ~ "Normal"))
+
+BW_responder = BW_responder %>% left_join(BW_responder2 %>% select(MouseID, BW_grp_15week), by = "MouseID")
+
 save(BW_responder, file = paste0(path_rec, "processed_16Sdata/temp_BW.RData"))
 ```
 
 ### plot responder
 ```{r}
-BW3 = BW2 %>% left_join(BW_responder %>% select(MouseID, BW_grp_1SD, BW_grp_1.5SD, BW_grp_2SD), by = "MouseID") %>% filter(!is.na(BW_grp_1SD))
-BW3 %>% select(MouseID, Sex, BirthMode, BW_grp_1SD) %>% unique() %>% group_by(BirthMode, Sex, BW_grp_1SD) %>% summarise(N = n())
-BW3 %>% select(MouseID, Sex, BirthMode, BW_grp_1.5SD) %>% unique() %>% group_by(BirthMode, Sex, BW_grp_1.5SD) %>% summarise(N = n())
-BW3 %>% select(MouseID, Sex, BirthMode, BW_grp_2SD) %>% unique() %>% group_by(BirthMode, Sex, BW_grp_2SD) %>% summarise(N = n())
-
+BW3 = BW2 %>% left_join(BW_responder %>% select(MouseID, BW_grp_1SD, BW_grp_1.5SD, BW_grp_2SD,BW_grp_15week), by = "MouseID") %>% filter(!is.na(BW_grp_1SD))
+BW3 %>% select(MouseID, Sex, BirthMode, BW_grp_1SD) %>% unique() %>% group_by(BirthMode, Sex, BW_grp_1SD) %>% summarise(N = n()) %>% pivot_wider(names_from = BW_grp_1SD, values_from = N)
+BW3 %>% select(MouseID, Sex, BirthMode, BW_grp_1.5SD) %>% unique() %>% group_by(BirthMode, Sex, BW_grp_1.5SD) %>% summarise(N = n()) %>% pivot_wider(names_from = BW_grp_1.5SD, values_from = N)
+BW3 %>% select(MouseID, Sex, BirthMode, BW_grp_2SD) %>% unique() %>% group_by(BirthMode, Sex, BW_grp_2SD) %>% summarise(N = n()) %>% pivot_wider(names_from = BW_grp_2SD, values_from = N)
+BW3 %>% select(MouseID, Sex, BirthMode, BW_grp_15week) %>% unique() %>% group_by(BirthMode, Sex, BW_grp_15week) %>% summarise(N = n()) %>% pivot_wider(names_from = BW_grp_15week, values_from = N)
 
 for (sd in c(1, 1.5, 2)){
   for (BM in c("VF","CS","CSR")){
@@ -345,13 +353,30 @@ for (sd in c(1, 1.5, 2)){
       width = 7, height = 5, units = "in", dpi = 300)
   }
 }
+  
+for (BM in c("VF","CS","CSR")){
+  p = ggplot(data = BW3 %>% filter(BirthMode == BM)) + 
+    geom_point(aes(x = TimePoint_Weeks, y = Weight_g, color = BW_grp_15week), size = 1) + 
+    geom_line(aes(x = TimePoint_Weeks, y = Weight_g, color = BW_grp_15week, group = MouseID), alpha = 0.8, size = 0.5) + 
+    scale_color_manual(values = BW_status_color, name = "BW status") + 
+    geom_line(data = BW_sum3 %>% filter(BirthMode == "VF"),
+              aes(x = TimePoint_Weeks, y = Mean, group = BirthMode), size = 1, color = "#377EB8") + 
+    geom_ribbon(data = BW_sum3 %>% filter(BirthMode == "VF"),
+                aes(x = TimePoint_Weeks,ymin = Mean - 1.5*SD, ymax = Mean + 1.5*SD, group = BirthMode),fill = "#377EB8", alpha = 0.2) +
+    scale_x_continuous(breaks = c(1:18)) + 
+    labs(x = "Age in Weeks", y = "Body Weight (g)", title = paste0("Body Wiehgt Status of ", BM, " in 1.5SD of VF BW Range base on week 15" )) + 
+    facet_grid(~Sex) 
+  ggsave(filename = paste0(temp_out,"body_weight/responder_15week_1.5SD_in_", BM, ".png"), plot = p,
+      width = 7, height = 5, units = "in", dpi = 300)
+}
+
 ```
 
 ### responder 16S
 ```{r}
 load(file = paste0(path_rec, "processed_16Sdata/temp.RData"))
 ### alpha
-dat = alpha %>% left_join(BW_responder %>% select(MouseID, BW_grp_1SD, BW_grp_1.5SD, BW_grp_2SD), by = "MouseID") %>% 
+dat = alpha %>% left_join(BW_responder %>% select(MouseID, BW_grp_1SD, BW_grp_1.5SD, BW_grp_2SD, BW_grp_15week), by = "MouseID") %>% 
     filter(Generation == "F1", !is.na(BW_grp_1SD))
 
  
@@ -394,6 +419,17 @@ for (a in c("Faith_PD", "Observed_feature", "Shannon")){
          plot = p, width = 7, height = 5, units = "in", dpi = 300)
 }
 
+for (a in c("Faith_PD", "Observed_feature", "Shannon")){
+    p = ggplot(dat, aes(x = TimePoint, y = get(a), color = BW_grp_15week)) + 
+        geom_boxplot() + 
+        #stat_compare_means() + 
+        stat_compare_means(label = "p.signif") + 
+        scale_color_manual(values = BW_status_color, aesthetics = c("color","fill"), name = "BW Status") +
+        labs(x = "Age Weeks", y = a) + 
+        facet_wrap(~Sex, labeller = labeller(Sex = Sex_labs))
+    ggsave(filename = paste0(temp_out,"alpha_by_weeks/BW_status_15Week_",a,".png"),
+         plot = p, width = 7, height = 5, units = "in", dpi = 300)
+}
 ```
 
 
