@@ -73,17 +73,20 @@ BW$BirthMode = factor(BW$BirthMode, levels = c("CS", "CSR","VF"))
 BW = BW %>% mutate(covid = case_when(Batch %in% c("Batch9","Batch10") ~ "Post covid",
                                      TRUE ~ "Before covid"))
 
-current_days <- max(BW$TimePoint_Days)
+BW_sum <- BW %>% group_by(TimePoint_Weeks, BirthMode, Sex) %>% 
+  summarise(N = n(), 
+            Mean = mean(Weight_g), 
+            SE = sd(Weight_g)/sqrt(N),
+            boot.lo = smean.cl.boot(Weight_g, conf.int = .95, B = 1000, na.rm = T, reps = F)[2],
+            boot.hi = smean.cl.boot(Weight_g, conf.int = .95, B = 1000, na.rm = T, reps = F)[3])
 
-BW_sum <- BW %>% group_by(TimePoint_Days, BirthMode, Sex) %>% summarise(N = n(), Mean = mean(Weight_g), SE = sd(Weight_g)/sqrt(N))
-
-y_max <- ceiling(max(BW$Weight_g)/4)*4
-p = ggplot(BW, aes(x = TimePoint_Days, y = Weight_g, color = BirthMode)) +
-    geom_point(size = 0.5, alpha = 0.5) +
-    geom_path(aes(group = MouseNo), color = "grey", size = 0.5, alpha = 0.5) +
-    geom_smooth(aes(fill = BirthMode), alpha = 0.3) +
-    geom_text_repel(data = BW_sum, aes(x = TimePoint_Days, y = Mean, label = N), size = 4, show.legend = F) +
-    facet_grid(.~Sex,labeller = labeller(Sex = Sex_labs)) +
+p = ggplot(BW, aes(x = TimePoint_Weeks, color = BirthMode)) +
+  geom_point(aes(y = Weight_g), size = 0.5, alpha = 0.5) +
+  geom_path(aes(y = Weight_g , group = MouseNo), color = "grey", size = 0.5, alpha = 0.5) + 
+  geom_ribbon(data = BW_sum, 
+              aes(x = TimePoint_Weeks, ymin = boot.lo, ymax = boot.hi, group = BirthMode, color = BirthMode)) + 
+  geom_text_repel(data = BW_sum, aes(x = TimePoint_Weeks, y = Mean, label = N), size = 4, show.legend = F) +
+  facet_grid(.~Sex,labeller = labeller(Sex = Sex_labs)) +
     scale_x_continuous(breaks = c(seq(7, current_days, 7)), labels = c(seq(7, current_days, 7))/7) + 
     scale_y_continuous(breaks = seq(2, y_max, 4)) +
     scale_color_manual(values = BirthMode_color, aesthetics = c("fill", "colour")) +
