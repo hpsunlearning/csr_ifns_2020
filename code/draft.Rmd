@@ -5,138 +5,477 @@ date: "7/2/2020"
 output: html_document
 ---
 
-## Preparation
-1. Setup
+## library
 ```{r setup, message=FALSE, warning=FALSE}
-# Loading library here
 library(knitr)
 library(tidyverse)
 library(readxl)
 library(ggrepel)
-# library(ggpubr)
+library(effects)
+library(lme4)
+library(sjPlot)
+library(lmerTest)
+library(phyloseq)
+library(qiime2R)
+library(picante)
+library(Hmisc)
+library(agricolae)
+library(vegan)
+library(ape)
+library(usedist)
+library(grid)
+library(gridExtra)
+library(gtable)
+library(ggpubr)
+```
 
-options(max.print="75")
-knitr::opts_chunk$set(echo = TRUE, cache = TRUE, warning = FALSE, prompt=FALSE, tidy = TRUE, comment = NA, message = FALSE)
-opts_knit$set(width=75)
-
+## settings
+```{r}
 # set path
-opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
-setwd(rprojroot::find_rstudio_root_file())
-## path to data record on dropbox
-path_rec <- "~/Dropbox/IFNH CSR/ExperimentRecords/"
-list.files(path_rec)
+path_rec = "~/Dropbox/IFNH CSR/ExperimentRecords/"
+temp_out = "~/Dropbox/Rutgers/20210328_RUN_33_IFNH_CSR/output/"
+# set colors, labs and so on
+BirthMode_color = c("VF"="#377EB8", "CSR"="#4DAF4A", "CS"="#E41A1C")
+Sex_labs = c("F" = "Female", "M" = "Male")
+responder_color = c("Responder"="#d95f0e", "Nonresponder"="gray50")
+BW_status_color = c("Overweight"="#7570b3", "Normal"="#b3cde3","Underweight"="#66a61e")
+# functions
+round_anova = function(a){
+    a$`Sum Sq` = round(a$`Sum Sq`,2)
+    a$`Mean Sq` = round(a$`Mean Sq`,2)
+    a$DenDF = round(a$DenDF,2)
+    a$`F value` = round(a$`F value`,4)
+    a$`Pr(>F)` = round(a$`Pr(>F)`,4)
+    a
+} 
 
-# number of cores/thread to use
-nc <- switch(Sys.info()[['sysname']], Windows = 1, Darwin = 4, Linux = 12)
-
-source("~/Dropbox/42-JCHWANG-RUTGERS/Projects-Rutgers/Src/utils.R")
-
-sessionInfo()
+kw_and_CI = function(wdat, x, y){
+  wk = wdat %>% split(., .[x])
+  out1 = sapply(wk, function(df){smean.cl.boot(df[y], conf.int = .95)}) %>% t() %>% as.data.frame() %>% rownames_to_column(var = x)
+  ktest = kruskal(wdat[y], wdat[x], alpha = 0.05, p.adj="none", group=T, main = "wdat", console=FALSE)
+  out2 = ktest$groups %>% rownames_to_column(var = x) %>% select(all_of(x), groups)
+  out1 = out1 %>% left_join(out2, by = x )
+  out1
+}
 ```
 
 ## Body weight
-### Overall, plotting all data
+### Body weight
+#### Body weight summary
 ```{r}
-BW <- read_excel(paste0(path_rec, "MasterMetadata-CS-SW-Oct2019-20210224-HS.xlsx"), sheet = "BodyWeightRecords", range = "A1:T2009") %>% filter(!is.na(Weight_g))
-BW$BirthMode = factor(BW$BirthMode, levels = c("VF", "CSR", "CS"))
+BW <- read_excel(paste0(path_rec, "MasterMetadata-CS-SW-Oct2019-20210402-HS.xlsx"), sheet = "BodyWeightRecords", range = "A1:T2009") %>% filter(!is.na(Weight_g))
+BW$BirthMode = factor(BW$BirthMode, levels = c("CS", "CSR","VF"))
+BW = BW %>% mutate(covid = case_when(Batch %in% c("Batch9","Batch10") ~ "Post covid",
+                                     TRUE ~ "Before covid"))
 
-# BW <- BW %>% filter(!FamilyID %in% c("VF1", "CSR1") )
-current_days <- max(BW$TimePoint_Days)
+BW_sum <- BW %>% group_by(TimePoint_Weeks, BirthMode, Sex) %>% 
+  summarise(N = n(),
+            N_batch = unique(Batch) %>% length,
+            N_family = unique(FamilyNo) %>% length(),
+            Mean = mean(Weight_g), 
+            SE = sd(Weight_g)/sqrt(N),
+            SD = sd(Weight_g),
+            boot.lo = smean.cl.boot(Weight_g, conf.int = .95, B = 1000, na.rm = T, reps = F)[2],
+            boot.hi = smean.cl.boot(Weight_g, conf.int = .95, B = 1000, na.rm = T, reps = F)[3])
 
-BW_sum <- BW %>% group_by(TimePoint_Days, BirthMode, Sex) %>% summarise(N = n(), Mean = mean(Weight_g), SE = sd(Weight_g)/sqrt(N))
-
-y_max <- ceiling(max(BW$Weight_g)/4)*4
-ggplot(BW, aes(x = TimePoint_Days, y = Weight_g, color = BirthMode)) +
-    geom_point(size = 0.5, alpha = 0.5) +
-    geom_path(aes(group = MouseNo), color = "grey", size = 0.5, alpha = 0.5) +
-    geom_smooth(aes(fill = BirthMode), alpha = 0.3) +
-    geom_text_repel(data = BW_sum, aes(x = TimePoint_Days, y = Mean, label = N), size = 4, show.legend = F) +
-    facet_grid(.~Sex) +
-    scale_x_continuous(breaks = c(seq(7, current_days, 7)), labels = c(seq(7, current_days, 7))/7) + 
-    scale_y_continuous(breaks = seq(2, y_max, 4)) +
-    scale_color_manual(values = c("#377EB8", "#4DAF4A", "#E41A1C")) +
-    scale_fill_manual(values = c("#377EB8", "#4DAF4A", "#E41A1C")) +
-    labs(x = "Sampling_Week", y = "Body Weight(g)", title = "C-Section Restoration Project - Body Weight Plots-AllData") +
-    theme_jw() + theme(panel.grid.minor = element_blank())
+BW_sum %>% mutate(Count = paste0(N, "(", N_family, ")")) %>% select(BirthMode, Sex, TimePoint_Weeks, Count) %>% spread(key = TimePoint_Weeks, value = Count) %>% kable()
 ```
 
-### Summary table
+#### LitterSize
 ```{r}
-BW_sum2 <- BW %>% group_by(TimePoint_Weeks, BirthMode, Sex) %>% summarise(N = n(), N_batch = unique(Batch) %>% length, N_family = unique(FamilyNo) %>% length(), Mean = mean(Weight_g), SE = sd(Weight_g)/sqrt(N))
-
-BW_sum2 %>% mutate(Count = paste0(N, "(", N_family, ")")) %>% select(BirthMode, Sex, TimePoint_Weeks, Count) %>% spread(key = TimePoint_Weeks, value = Count) %>% View
+a = BW %>% select(FamilyID, LitterSize_Born, LitterSize_InProject) %>% unique()
+cor(a$LitterSize_Born,a$LitterSize_InProject)
 ```
 
-### Detailed plot
+#### Gestational days 
 ```{r}
-date_range <- c(2, BW_sum2$TimePoint_Weeks[BW_sum2$N_family>=5] %>% max)
-
-BW_dat <- BW %>% dplyr::filter(TimePoint_Weeks<=date_range[2], TimePoint_Weeks>=date_range[1])
-
-BW_dat_stat_sum <- BW_dat %>% group_by(TimePoint_Weeks, BirthMode, Sex) %>% summarise(Mean_cl = Hmisc::smean.cl.normal(x = Weight_g) %>% paste(collapse = "-"), N = n()) %>% separate(Mean_cl, into = c("Mean", "Lwr", "Uwr"), sep = "-", convert = T) %>% ungroup
-
-BW_dat_test_sum <- split(BW_dat, f = list(BW_dat$TimePoint_Weeks, BW_dat$Sex)) %>% lapply(., function(x){(aov(Weight_g ~ BirthMode, data = x) %>% agricolae::duncan.test(trt = "BirthMode", console = T))$groups %>% rownames_to_column(var = "BirthMode")})
-
-BW_dat_test_sum2 <- lapply(seq_along(BW_dat_test_sum), function(x){BW_dat_test_sum[[x]] %>% mutate(Weeks_sex = names(BW_dat_test_sum)[[x]]) %>% separate(Weeks_sex, into = c("TimePoint_Weeks", "Sex"), sep = "\\.")}) %>% do.call("rbind",.) %>% mutate(TimePoint_Weeks = as.numeric(TimePoint_Weeks))
-
-
-ggplot(BW_dat, aes(x = TimePoint_Weeks, y = Weight_g, color = BirthMode)) +
-    geom_point(data = BW, size = 0.5, alpha = 0.5) +
-    geom_path(data = BW, aes(group = MouseNo), color = "grey", size = 0.5, alpha = 0.5) +
-    stat_summary(data = BW %>% filter(TimePoint_Weeks>=10), geom = "point", fun = "mean", size = 1) +
-    stat_summary(data = BW %>% filter(TimePoint_Weeks>=10), geom = "line", fun = "mean", linetype = "dashed") +
-    geom_ribbon(data = BW_dat_stat_sum, aes(x = TimePoint_Weeks, y = Mean, ymin = Lwr, ymax = Uwr, fill = BirthMode), alpha = 0.3) +
-    geom_point(data = BW_dat_stat_sum, aes(x = TimePoint_Weeks, y = Mean), size = 1.5) +
-    geom_line(data = BW_dat_stat_sum, aes(x = TimePoint_Weeks, y = Mean)) +
-    geom_label_repel(data = BW_dat_test_sum2, aes(label = groups), size = 6/.pt, label.padding = 0.1) +
-    facet_grid(.~Sex) +
-    scale_x_continuous(breaks = c(seq(2, 18, 1))) + 
-    scale_color_manual(values = c("#377EB8", "#4DAF4A", "#E41A1C")) +
-    scale_fill_manual(values = c("#377EB8", "#4DAF4A", "#E41A1C")) +
-    labs(x = "Sampling_Week", y = "Body Weight(g)", title = "C-Section Restoration Project - Body Weight", subtitle = str_wrap("Mean and 95% CI were plotted; ANOVA test with duncan's multiple range tests were performed at each week ", width = 120)) +
-    theme_jw() + theme(panel.grid.minor = element_blank(), aspect.ratio = 0.8, plot.title = element_text(hjust = 0))
-set_panel_size(file = "results/figs/exploratory/BW.pdf", width = unit(4, "in"), height = unit(3.2, "in"), useDingbats = F)
+FR <- read_excel(paste0(path_rec, "MasterMetadata-CS-SW-Oct2019-20210224-HS.xlsx"), sheet = "FamilyRecords", na = c("","NA"), range = "A1:V145")
+a = table(FR$BirthMode,FR$GestationalDay_Birth)
+aa = a %>% as.matrix.data.frame() %>% as.data.frame()
+colnames(aa) = colnames(a)
+rownames(aa) = rownames(a)
+a
 ```
 
-## Body Weight gain relative to week 3
+#### plot body weight
 ```{r}
-BW_f <- BW %>% filter(ExperimentSet=="Set1-BW", TimePoint_Weeks>=3) %>% arrange(TimePoint_Weeks) %>% group_by(MouseID) %>% mutate(Weight_gain = Weight_g - Weight_g[1])
+p = ggplot(BW, aes(x = TimePoint_Weeks, color = BirthMode)) +
+  geom_point(aes(y = Weight_g), size = 0.5, alpha = 0.7) +
+  geom_path(aes(y = Weight_g , group = MouseID), size = 0.3, alpha = 0.3) + 
+  geom_ribbon(data = BW_sum, alpha = 0.5, size = 0.1,
+              aes(x = TimePoint_Weeks, ymin = boot.lo, ymax = boot.hi, group = BirthMode, color = BirthMode, fill = BirthMode)) + 
+  #geom_text_repel(data = BW_sum, aes(x = TimePoint_Weeks, y = Mean, label = N), size = 3, show.legend = F) +
+  geom_path(data = BW_sum, aes(x = TimePoint_Weeks, y = Mean, group = BirthMode)) + 
+  facet_grid(.~Sex,labeller = labeller(Sex = Sex_labs)) +
+  scale_x_continuous(breaks = c(1:18)) + 
+  scale_color_manual(values = BirthMode_color, aesthetics = c("fill", "colour")) +
+  labs(x = "Age (Week)", y = "Body Weight (g)", title = "")
+ggsave(filename = paste0(temp_out,"body_weight/body_weight_overall.png"), plot = p,
+    width = 10, height = 5, units = "in", dpi = 300)
+```
 
-date_range <- c(4, 16)
+#### LMM on bodyweight
+```{r}
+fit = lm(Weight_g ~ TimePoint_Weeks*BirthMode + Sex + LitterSize_Born, data = BW)
+fit_lme4 = lmer(Weight_g ~ TimePoint_Weeks*BirthMode + Sex + (TimePoint_Weeks|MouseID), data = BW,
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
+fit_lme4_f = lmer(Weight_g ~ TimePoint_Weeks*BirthMode + (TimePoint_Weeks|MouseID), data = BW %>% filter(Sex == "F"),
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
+fit_lme4_m = lmer(Weight_g ~ TimePoint_Weeks*BirthMode + (TimePoint_Weeks|MouseID), data = BW %>% filter(Sex == "M"),
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
 
-BW_f_dat <- BW_f %>% filter(TimePoint_Weeks<=date_range[2], TimePoint_Weeks>=date_range[1])
+a_tab = round_anova(as.data.frame(anova(fit_lme4_f)))    
+p = plot_model(fit_lme4_f, type = "pred", terms = c("TimePoint_Weeks","BirthMode"), colors = BirthMode_color, ci.lvl = .95) + 
+    scale_y_continuous(limits = c(8, 90), breaks = seq(from = 15, to = 75, by = 5)) + 
+    scale_x_continuous(breaks = seq(from = 1, to = 18, by = 2)) + 
+    labs(x = "Age (Week)", y = "Body Weight (g)", title = "Predicted Value of Body Weight of Female") + 
+    theme_bw() + theme(panel.background = element_rect(fill = NA), 
+                       plot.title = element_text(hjust = 0.5),
+                       text = element_text(face = 'bold'))
+p = p + annotation_custom(grob = tableGrob(a_tab, theme = ttheme_minimal(base_size = 6)),
+                     xmin = 0.1, xmax = 14, ymin = 65, ymax = 90)
+ggsave(filename = paste0(temp_out,"body_weight/LMM_BW_female.png"), plot = p,
+    width = 7, height = 5, units = "in", dpi = 300)
 
-BW_f_dat %>% group_by(TimePoint_Weeks, BirthMode, Sex) %>% summarise(N = n()) %>% pivot_wider(names_from = c(BirthMode, Sex), values_from = N)
+a_tab = round_anova(as.data.frame(anova(fit_lme4_m))) 
+p = plot_model(fit_lme4_m, type = "pred", terms = c("TimePoint_Weeks","BirthMode"), colors = BirthMode_color, ci.lvl = .95) + 
+    scale_y_continuous(limits = c(8, 90), breaks = seq(from = 15, to = 75, by = 5)) + 
+    scale_x_continuous(breaks = seq(from = 1, to = 18, by = 2)) + 
+    labs(x = "Age (Week)", y = "Body Weight (g)", title = "Predicted Value of Body Weight of Male") + 
+    theme_bw() + theme(panel.background = element_rect(fill = NA), 
+                       plot.title = element_text(hjust = 0.5),
+                       text = element_text(face = 'bold'))
+p = p + annotation_custom(grob = tableGrob(a_tab, theme = ttheme_minimal(base_size = 6)),
+                     xmin = 0.1, xmax = 14, ymin = 65, ymax = 90)
+ggsave(filename = paste0(temp_out,"body_weight/LMM_BW_male.png"), plot = p,
+    width = 7, height = 5, units = "in", dpi = 300)
+```
 
-BW_f_dat_stat_sum <- BW_f_dat %>% group_by(TimePoint_Weeks, BirthMode, Sex) %>% summarise(Mean_cl = Hmisc::smean.cl.normal(x = Weight_gain) %>% paste(collapse = "-"), N = n()) %>% separate(Mean_cl, into = c("Mean", "Lwr", "Uwr"), sep = "-", convert = T) %>% ungroup
+### Body Weight gain relative to week 3
+#### summary
+```{r}
+BWgain= BW %>% filter(TimePoint_Weeks > 2) %>% arrange(MouseID, TimePoint_Weeks) %>% group_by(MouseID) %>% 
+    mutate(BW_gain = Weight_g - Weight_g[1], 
+           BW_gain_percent = BW_gain/Weight_g[1],
+           N = n()) %>% 
+    filter(TimePoint_Weeks > 3, N > 3)
 
-BW_f_dat_test <- BW_f_dat %>% group_by(TimePoint_Weeks, Sex) %>% t_test(Weight_gain ~ BirthMode, p.adjust.method = "none") %>% ungroup() %>% mutate(p.adj = p.adjust(p, method = "fdr"))
+BWgain_sum <- BWgain %>% group_by(TimePoint_Weeks, BirthMode, Sex) %>% 
+  summarise(N = n(), 
+            N_batch = unique(Batch) %>% length, 
+            N_family = unique(FamilyNo) %>% length(), 
+            Mean = mean(BW_gain), 
+            boot.lo = smean.cl.boot(BW_gain, conf.int = .95, B = 1000, na.rm = T, reps = F)[2],
+            boot.hi = smean.cl.boot(BW_gain, conf.int = .95, B = 1000, na.rm = T, reps = F)[3],
+            Mean_p = mean(BW_gain_percent), 
+            boot_p.lo = smean.cl.boot(BW_gain_percent, conf.int = .95, B = 1000, na.rm = T, reps = F)[2],
+            boot_p.hi = smean.cl.boot(BW_gain_percent, conf.int = .95, B = 1000, na.rm = T, reps = F)[3])
 
-BW_f_dat_test_tbl1 <- BW_f_dat_test %>% pivot_wider(id_cols = c(Sex, group1, group2), names_from = TimePoint_Weeks, values_from = p.adj)
+BWgain_sum %>% mutate(Count = paste0(N, "(", N_family, ")")) %>% select(BirthMode, Sex, TimePoint_Weeks, Count) %>% spread(key = TimePoint_Weeks, value = Count) %>% kable()
+```
 
+#### plot BWgain
+```{r}
+p = ggplot(BWgain, aes(x = TimePoint_Weeks, color = BirthMode)) +
+  geom_point(aes(y = BW_gain),size = 0.5, alpha = 0.7) +
+  geom_path(aes(y = BW_gain, group = MouseID), size = 0.3, alpha = 0.2) +
+  geom_ribbon(data = BWgain_sum, alpha = 0.3, size = 0.1,
+              aes(x = TimePoint_Weeks, ymin = boot.lo, ymax = boot.hi, group = BirthMode, color = BirthMode, fill = BirthMode)) + 
+  #geom_text_repel(data = BWgain_sum, aes(x = TimePoint_Weeks, y = Mean, label = N), size = 3, show.legend = F) + 
+  geom_path(data = BWgain_sum, aes(x = TimePoint_Weeks, y = Mean, group = BirthMode)) + 
+  facet_grid(.~Sex,labeller = labeller(Sex = Sex_labs)) +
+  scale_x_continuous(breaks = c(4:18)) +
+  scale_color_manual(values = BirthMode_color, aesthetics = c("fill", "colour")) +
+  labs(x = "Age (Week)", y = "Body Weight gain (g)", title = "") 
+ggsave(filename = paste0(temp_out,"body_weight/body_weight_gain_overall.png"), plot = p,
+    width = 10, height = 5, units = "in", dpi = 300)
 
-BW_f_dat_test_sum <- split(BW_f_dat, f = list(BW_f_dat$TimePoint_Weeks, BW_f_dat$Sex)) %>% lapply(., function(x){(aov(Weight_gain ~ BirthMode, data = x) %>% agricolae::duncan.test(trt = "BirthMode", console = T))$groups %>% rownames_to_column(var = "BirthMode")})
+p = ggplot(BWgain, aes(x = TimePoint_Weeks, color = BirthMode)) +
+  geom_point(aes(y = BW_gain_percent), size = 0.5, alpha = 0.7) +
+  geom_path(aes(y = BW_gain_percent, group = MouseID), size = 0.3, alpha = 0.2) +
+  geom_ribbon(data = BWgain_sum, alpha = 0.3, size = 0.1,
+              aes(x = TimePoint_Weeks, ymin = boot_p.lo, ymax = boot_p.hi, group = BirthMode, color = BirthMode, fill = BirthMode)) + 
+  #geom_text_repel(data = BWgain_sum, aes(x = TimePoint_Weeks, y = Mean, label = N), size = 3, show.legend = F) + 
+  geom_path(data = BWgain_sum, aes(x = TimePoint_Weeks, y = Mean_p, group = BirthMode)) + 
+  facet_grid(.~Sex,labeller = labeller(Sex = Sex_labs)) +
+  scale_x_continuous(breaks = c(4:18)) + 
+  scale_y_continuous(breaks = c(1, 1.5, 2, 2.5, 3, 3.5, 4), labels = scales::percent) +
+  scale_color_manual(values = BirthMode_color, aesthetics = c("fill", "colour")) +
+  labs(x = "Age (Week)", y = "Body Weight gain (%)", title = "") 
+ggsave(filename = paste0(temp_out,"body_weight/body_weight_gain_percent_overall.png"), plot = p,
+    width = 10, height = 5, units = "in", dpi = 300)
+```
 
-BW_f_dat_test_sum2 <- lapply(seq_along(BW_f_dat_test_sum), function(x){BW_f_dat_test_sum[[x]] %>% mutate(Weeks_sex = names(BW_f_dat_test_sum)[[x]]) %>% separate(Weeks_sex, into = c("TimePoint_Weeks", "Sex"), sep = "\\.")}) %>% do.call("rbind",.) %>% mutate(TimePoint_Weeks = as.numeric(TimePoint_Weeks))
+#### LMM BW_gain
+```{r}
+fitgain = lm(BW_gain ~ TimePoint_Weeks*BirthMode + Sex + LitterSize_Born, data = BWgain)
+fitgain_lme4 = lmer(BW_gain ~ TimePoint_Weeks*BirthMode + Sex + (TimePoint_Weeks|MouseID), data = BWgain,
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
+fitgain_lme4_f = lmer(BW_gain ~ TimePoint_Weeks*BirthMode + (TimePoint_Weeks|MouseID), data =  BWgain %>% filter(Sex == "F"),
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
+fitgain_lme4_m = lmer(BW_gain ~ TimePoint_Weeks*BirthMode + (TimePoint_Weeks|MouseID), data =  BWgain %>% filter(Sex == "M"),
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
 
+a_tab = round_anova(as.data.frame(anova(fitgain_lme4_f)))    
+p = plot_model(fitgain_lme4_f, type = "pred", terms = c("TimePoint_Weeks","BirthMode"), colors = BirthMode_color, ci.lvl = .95) + 
+    scale_y_continuous(limits = c(5, 55)) + 
+    scale_x_continuous(breaks = c(4:18)) + 
+    labs(x = "Age (Week)", y = "Body Weight Gain (g)", title = "Predicted Value of Body Weight Gain of Female") + 
+    theme_bw() + theme(panel.background = element_rect(fill = NA), 
+                       plot.title = element_text(hjust = 0.5),
+                       text = element_text(face = 'bold'))
+p = p + annotation_custom(grob = tableGrob(a_tab, theme = ttheme_minimal(base_size = 6)),
+                     xmin = 4, xmax = 14, ymin = 45, ymax = 55)
+ggsave(filename = paste0(temp_out,"body_weight/LMM_BWgain_g_female.png"), plot = p,
+    width = 7, height = 5, units = "in", dpi = 300)
 
-ggplot(BW_f_dat, aes(x = TimePoint_Weeks, y = Weight_gain, color = BirthMode)) +
-    geom_point(size = 0.5, alpha = 0.5) +
-    geom_path(aes(group = MouseNo), color = "grey", size = 0.5, alpha = 0.5) +
-    stat_summary(geom = "point", fun = "mean", size = 1) +
-    stat_summary(geom = "line", fun = "mean", linetype = "dashed") +
-    geom_ribbon(data = BW_f_dat_stat_sum, aes(x = TimePoint_Weeks, y = Mean, ymin = Lwr, ymax = Uwr, fill = BirthMode), alpha = 0.2, color = NA) +
-    geom_point(data = BW_f_dat_stat_sum, aes(x = TimePoint_Weeks, y = Mean), size = 1.5) +
-    geom_line(data = BW_f_dat_stat_sum, aes(x = TimePoint_Weeks, y = Mean)) +
-    geom_label_repel(data = BW_f_dat_test_sum2, aes(label = groups), size = 6/.pt, label.padding = 0.1) +
-    facet_grid(.~Sex) +
-    scale_x_continuous(breaks = c(seq(2, 18, 1))) + 
-    scale_color_manual(values = c("#377EB8", "#4DAF4A", "#E41A1C")) +
-    scale_fill_manual(values = c("#377EB8", "#4DAF4A", "#E41A1C")) +
-    labs(x = "Sampling_Week", y = "Body Weight(g)", title = "C-Section Restoration Project - Body Weight", subtitle = str_wrap("Mean and 95% CI were plotted starting from week 4; ANOVA test with duncan's multiple range tests were performed at each week between week 4 and 15.", width = 120)) +
-    theme_jw() + theme(panel.grid.minor = element_blank(), aspect.ratio = 0.8, plot.title = element_text(hjust = 0))
+a_tab = round_anova(as.data.frame(anova(fitgain_lme4_m)))    
+p = plot_model(fitgain_lme4_m, type = "pred", terms = c("TimePoint_Weeks","BirthMode"), colors = BirthMode_color, ci.lvl = .95) + 
+    scale_y_continuous(limits = c(5, 55)) + 
+    scale_x_continuous(breaks = c(4:18)) + 
+    labs(x = "Age (Week)", y = "Body Weight Gain (g)", title = "Predicted Value of Body Weight Gain of Male") + 
+    theme_bw() + theme(panel.background = element_rect(fill = NA), 
+                       plot.title = element_text(hjust = 0.5),
+                       text = element_text(face = 'bold'))
+p = p + annotation_custom(grob = tableGrob(a_tab, theme = ttheme_minimal(base_size = 6)),
+                     xmin = 4, xmax = 14, ymin = 45, ymax = 55)
+ggsave(filename = paste0(temp_out,"body_weight/LMM_BWgain_g_male.png"), plot = p,
+    width = 7, height = 5, units = "in", dpi = 300)
+```
+
+#### LMM BW_gain_percent
+```{r}
+fitgainp = lm(BW_gain_percent ~ TimePoint_Weeks*BirthMode + Sex + LitterSize_Born, data = BWgain)
+fitgainp_lme4 = lmer(BW_gain_percent ~ TimePoint_Weeks*BirthMode + Sex + (TimePoint_Weeks|MouseID), data = BWgain,
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
+fitgainp_lme4_f = lmer(BW_gain_percent ~ TimePoint_Weeks*BirthMode + (TimePoint_Weeks|MouseID), data = BWgain %>% filter(Sex == "F"),
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
+fitgainp_lme4_m = lmer(BW_gain_percent ~ TimePoint_Weeks*BirthMode + (TimePoint_Weeks|MouseID), data = BWgain %>% filter(Sex == "M"),
+                        control = lmerControl(optimizer ="Nelder_Mead"), REML = F)
+
+a_tab = round_anova(as.data.frame(anova(fitgainp_lme4_f)))    
+p = plot_model(fitgainp_lme4_f, type = "pred", terms = c("TimePoint_Weeks","BirthMode"), colors = BirthMode_color, ci.lvl = .95) + 
+    scale_y_continuous(limits = c(0.5, 3.8), breaks = c(1, 1.5, 2, 2.5, 3, 3.5),labels = scales::percent) + 
+    scale_x_continuous(breaks = c(4:18)) + 
+    labs(x = "Age (Week)", y = "Body Weight Gain (%)", title = "Predicted Value of Body Weight Gain of Female") + 
+    theme_bw() + theme(panel.background = element_rect(fill = NA), 
+                       plot.title = element_text(hjust = 0.5),
+                       text = element_text(face = 'bold'))
+p = p + annotation_custom(grob = tableGrob(a_tab, theme = ttheme_minimal(base_size = 6)),
+                     xmin = 4, xmax = 15, ymin = 3.2, ymax = 3.8)
+ggsave(filename = paste0(temp_out,"body_weight/LMM_BWgain_percent_female.png"), plot = p,
+    width = 7, height = 5, units = "in", dpi = 300)
+
+a_tab = round_anova(as.data.frame(anova(fitgainp_lme4_m)))  
+p = plot_model(fitgainp_lme4_m, type = "pred", terms = c("TimePoint_Weeks","BirthMode"), colors = BirthMode_color, ci.lvl = .95) + 
+    scale_y_continuous(limits = c(0.5, 3.8), breaks = c(1, 1.5, 2, 2.5, 3, 3.5),labels = scales::percent) + 
+    scale_x_continuous(breaks = c(4:18)) + 
+    labs(x = "Age (Week)", y = "Body Weight Gain (%)", title = "Predicted Value of Body Weight Gain of Male") + 
+    theme_bw() + theme(panel.background = element_rect(fill = NA), 
+                       plot.title = element_text(hjust = 0.5),
+                       text = element_text(face = 'bold'))
+p = p + annotation_custom(grob = tableGrob(a_tab, theme = ttheme_minimal(base_size = 6)),
+                     xmin = 4, xmax = 15, ymin = 3.2, ymax = 3.8)
+ggsave(filename = paste0(temp_out,"body_weight/LMM_BWgain_percent_male.png"), plot = p,
+    width = 7, height = 5, units = "in", dpi = 300)
 
 ```
+
+### BW status
+#### summary range
+```{r}
+BW2 = BW %>% left_join(BW_sum %>% filter(BirthMode == "VF") %>% select(TimePoint_Weeks, Sex, Mean, SD), by=c("TimePoint_Weeks","Sex")) %>%
+    rename(VF.mean = Mean, VF.sd = SD, BirthMode = BirthMode.x) %>% 
+    select(-BirthMode.y) %>%
+    mutate(BW_status_1SD = case_when(Weight_g > VF.mean + 1*VF.sd ~ "Overweight",
+                              Weight_g < VF.mean - 1*VF.sd ~ "Underweight",
+                              TRUE ~ "Normal"),
+           BW_status_1.5SD = case_when(Weight_g > VF.mean + 1.5*VF.sd ~ "Overweight",
+                              Weight_g < VF.mean - 1.5*VF.sd ~ "Underweight",
+                              TRUE ~ "Normal"),
+           BW_status_2SD = case_when(Weight_g > VF.mean + 2*VF.sd ~ "Overweight",
+                              Weight_g < VF.mean - 2*VF.sd ~ "Underweight",
+                              TRUE ~ "Normal")) 
+
+mouse_kept_for_curve = BW2 %>% filter(TimePoint_Weeks>14) %>% pull(MouseID) %>% unique()
+
+BW_responder = BW2 %>% filter(MouseID %in% mouse_kept_for_curve) %>% 
+  filter(TimePoint_Weeks >3) %>% 
+  arrange(MouseID, TimePoint_Weeks) %>%
+  group_by(MouseID, BirthMode, Sex) %>% 
+  summarise(N_measure = n(),
+            N_ow_1SD = sum(BW_status_1SD == "Overweight", na.rm = T),
+            N_uw_1SD = sum(BW_status_1SD == "Underweight", na.rm = T),
+            N_ow_1.5SD = sum(BW_status_1.5SD == "Overweight", na.rm = T),
+            N_uw_1.5SD = sum(BW_status_1.5SD == "Underweight", na.rm = T),
+            N_ow_2SD = sum(BW_status_2SD == "Overweight", na.rm = T),
+            N_uw_2SD = sum(BW_status_2SD == "Underweight", na.rm = T)) %>% 
+    ungroup() %>% 
+    mutate(ow_ratio_1SD = N_ow_1SD/N_measure,
+           uw_ratio_1SD = N_uw_1SD/N_measure,
+           ow_ratio_1.5SD = N_ow_1.5SD/N_measure,
+           uw_ratio_1.5SD = N_uw_1.5SD/N_measure,
+           ow_ratio_2SD = N_ow_2SD/N_measure,
+           uw_ratio_2SD = N_uw_2SD/N_measure,
+           BW_grp_1SD = case_when(ow_ratio_1SD > 0.5  ~ "Overweight",
+                              uw_ratio_1SD > 0.5  ~ "Underweight",
+                              TRUE ~ "Normal"),
+           BW_grp_1.5SD = case_when(ow_ratio_1.5SD > 0.5  ~ "Overweight",
+                              uw_ratio_1.5SD > 0.5  ~ "Underweight",
+                              TRUE ~ "Normal"),
+           BW_grp_2SD = case_when(ow_ratio_2SD > 0.5  ~ "Overweight",
+                              uw_ratio_2SD > 0.5  ~ "Underweight",
+                              TRUE ~ "Normal"))
+
+BW_responder2 = BW2 %>% filter(MouseID %in% mouse_kept_for_curve) %>% 
+  filter(TimePoint_Weeks == 15) %>% 
+  arrange(MouseID) %>%
+  mutate(BW_grp_15week = case_when(BW_status_1.5SD == "Overweight" ~ "Overweight",
+                              BW_status_1.5SD == "Underweight"  ~ "Underweight",
+                              TRUE ~ "Normal"))
+
+BW_responder = BW_responder %>% left_join(BW_responder2 %>% select(MouseID, BW_grp_15week), by = "MouseID")
+
+BW3 = BW2 %>% left_join(BW_responder %>% select(MouseID, BW_grp_1SD, BW_grp_1.5SD, BW_grp_2SD,BW_grp_15week), by = "MouseID") %>% filter(!is.na(BW_grp_1SD))
+BW3 %>% select(MouseID, Sex, BirthMode, BW_grp_1SD) %>% unique() %>% group_by(BirthMode, Sex, BW_grp_1SD) %>% summarise(N = n()) %>% pivot_wider(names_from = BW_grp_1SD, values_from = N) %>% kable()
+BW3 %>% select(MouseID, Sex, BirthMode, BW_grp_1.5SD) %>% unique() %>% group_by(BirthMode, Sex, BW_grp_1.5SD) %>% summarise(N = n()) %>% pivot_wider(names_from = BW_grp_1.5SD, values_from = N) %>% kable()
+BW3 %>% select(MouseID, Sex, BirthMode, BW_grp_2SD) %>% unique() %>% group_by(BirthMode, Sex, BW_grp_2SD) %>% summarise(N = n()) %>% pivot_wider(names_from = BW_grp_2SD, values_from = N) %>% kable()
+BW3 %>% select(MouseID, Sex, BirthMode, BW_grp_15week) %>% unique() %>% group_by(BirthMode, Sex, BW_grp_15week) %>% summarise(N = n()) %>% pivot_wider(names_from = BW_grp_15week, values_from = N) %>% kable()
+
+```
+
+#### plot responder
+```{r}
+for (sd in c(1, 1.5, 2)){
+  for (BM in c("VF","CS","CSR")){
+    p = ggplot(data = BW3 %>% filter(BirthMode == BM)) + 
+      geom_point(aes(x = TimePoint_Weeks, y = Weight_g, color = get(paste0("BW_grp_", sd, "SD"))), size = 1) + 
+      geom_line(aes(x = TimePoint_Weeks, y = Weight_g, color = get(paste0("BW_grp_", sd, "SD")), group = MouseID),alpha = 0.8, size = 0.5) + 
+      scale_color_manual(values = BW_status_color, name = "BW status") + 
+      geom_line(data = BW_sum %>% filter(BirthMode == "VF"),
+              aes(x = TimePoint_Weeks, y = Mean, group = BirthMode), size = 1, color = "#377EB8") + 
+      geom_ribbon(data = BW_sum %>% filter(BirthMode == "VF"),
+                aes(x = TimePoint_Weeks,ymin = Mean - sd*SD, ymax = Mean + sd*SD, group = BirthMode),fill = "#377EB8", alpha = 0.2) +
+      scale_x_continuous(breaks = c(1:18)) + 
+      labs(x = "Age in Weeks", y = "Body Weight (g)", title = paste0("Body Wiehgt Status of ", BM, " in ", sd, "SD of VF BW Range" )) + 
+      facet_grid(~Sex) 
+    ggsave(filename = paste0(temp_out,"body_weight/responder_", sd, "SD_in_", BM, ".png"), plot = p,
+      width = 10, height = 5, units = "in", dpi = 300)
+  }
+}
+  
+for (BM in c("VF","CS","CSR")){
+  p = ggplot(data = BW3 %>% filter(BirthMode == BM)) + 
+    geom_point(aes(x = TimePoint_Weeks, y = Weight_g, color = BW_grp_15week), size = 1) + 
+    geom_line(aes(x = TimePoint_Weeks, y = Weight_g, color = BW_grp_15week, group = MouseID), alpha = 0.8, size = 0.5) + 
+    scale_color_manual(values = BW_status_color, name = "BW status") + 
+    geom_line(data = BW_sum %>% filter(BirthMode == "VF"),
+              aes(x = TimePoint_Weeks, y = Mean, group = BirthMode), size = 1, color = "#377EB8") + 
+    geom_ribbon(data = BW_sum %>% filter(BirthMode == "VF"),
+                aes(x = TimePoint_Weeks,ymin = Mean - 1.5*SD, ymax = Mean + 1.5*SD, group = BirthMode),fill = "#377EB8", alpha = 0.2) +
+    scale_x_continuous(breaks = c(1:18)) + 
+    labs(x = "Age in Weeks", y = "Body Weight (g)", title = paste0("Body Wiehgt Status of ", BM, " in 1.5SD of VF BW Range base on week 15" )) + 
+    facet_grid(~Sex) 
+  ggsave(filename = paste0(temp_out,"body_weight/responder_15week_1.5SD_in_", BM, ".png"), plot = p,
+      width = 10, height = 5, units = "in", dpi = 300)
+}
+
+```
+
+### save intermediate data
+```{r}
+save(BW_responder, BW, BW2, BW3, BWgain, BW_sum, BWgain_sum, file = paste0(path_rec, "processed_16Sdata/temp_BW.RData"))
+```
+
+
+## Fecal 16S
+
+
+
+
+
+
+
+
+
+
+### responder 16S
+```{r}
+load(file = paste0(path_rec, "processed_16Sdata/temp.RData"))
+### alpha
+dat = alpha %>% left_join(BW_responder %>% select(MouseID, BW_grp_1SD, BW_grp_1.5SD, BW_grp_2SD, BW_grp_15week), by = "MouseID") %>% 
+    filter(Generation == "F1", !is.na(BW_grp_1SD))
+
+ 
+res_summary = data.frame(BW_grp_1.5SD = NA, Mean = NA, Lower = NA, Upper = NA, groups = NA, Weeks = NA, Sex = NA, alpha_metrics = NA )
+for(time_point in sort(unique(dat$TimePoint))){
+  for(sex in unique(dat$Sex)){
+    wdat = dat %>% filter(TimePoint == time_point, Sex == sex) 
+    for (alpha_metrics in c("Faith_PD", "Observed_feature", "Shannon")){
+      res = kw_and_CI(wdat = wdat, x = "BW_grp_1.5SD", y = alpha_metrics)
+      res$Weeks = time_point
+      res$Sex = sex
+      res$alpha_metrics = alpha_metrics
+      res_summary = rbind(res_summary, res)
+    }  
+  }
+} 
+res_summary = res_summary %>% filter(!is.na(alpha_metrics))
+
+for (a in c("Faith_PD", "Observed_feature", "Shannon")){
+    p = ggplot(dat, aes(x = TimePoint, y = get(a), color = BW_grp_1.5SD)) + 
+        geom_boxplot() + 
+        #stat_compare_means() + 
+        stat_compare_means(label = "p.signif") + 
+        scale_color_manual(values = BW_status_color, aesthetics = c("color","fill"), name = "BW Status") +
+        labs(x = "Age Weeks", y = a) + 
+        facet_wrap(~Sex, labeller = labeller(Sex = Sex_labs))
+    ggsave(filename = paste0(temp_out,"alpha_by_weeks/BW_status_1.5SD_",a,".png"),
+         plot = p, width = 7, height = 5, units = "in", dpi = 300)
+}
+
+for (a in c("Faith_PD", "Observed_feature", "Shannon")){
+    p = ggplot(dat, aes(x = TimePoint, y = get(a), color = BW_grp_1SD)) + 
+        geom_boxplot() + 
+        #stat_compare_means() + 
+        stat_compare_means(label = "p.signif") + 
+        scale_color_manual(values = BW_status_color, aesthetics = c("color","fill"), name = "BW Status") +
+        labs(x = "Age Weeks", y = a) + 
+        facet_wrap(~Sex, labeller = labeller(Sex = Sex_labs))
+    ggsave(filename = paste0(temp_out,"alpha_by_weeks/BW_status_1SD_",a,".png"),
+         plot = p, width = 7, height = 5, units = "in", dpi = 300)
+}
+
+for (a in c("Faith_PD", "Observed_feature", "Shannon")){
+    p = ggplot(dat, aes(x = TimePoint, y = get(a), color = BW_grp_15week)) + 
+        geom_boxplot() + 
+        #stat_compare_means() + 
+        stat_compare_means(label = "p.signif") + 
+        scale_color_manual(values = BW_status_color, aesthetics = c("color","fill"), name = "BW Status") +
+        labs(x = "Age Weeks", y = a) + 
+        facet_wrap(~Sex, labeller = labeller(Sex = Sex_labs))
+    ggsave(filename = paste0(temp_out,"alpha_by_weeks/BW_status_15Week_",a,".png"),
+         plot = p, width = 7, height = 5, units = "in", dpi = 300)
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 ## DEXA
